@@ -1,0 +1,17 @@
+[project]
+name = "chat-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.115.8",
+    "langchain-community>=0.3.18",
+    "langchain>=0.3.19",
+    "psycopg2-binary>=2.9.10",
+    "pydantic-settings>=2.8.0",
+    "pyjwt>=2.10.1",
+    "sqlalchemy>=2.0.38",
+    "supabase>=2.13.0",
+    "stripe>=11.6.0",
+]
