@@ -250,6 +250,9 @@ class TokenResponse(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+    redirect_url: Optional[str] = None
 
 # AI response schemas
 class AIResponse(BaseModel):

@@ -1,5 +1,7 @@
 # app/api/v1/auth.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -110,4 +112,65 @@ async def logout_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Sign out failed: {str(e)}"
+        )
+    
+@router.get("/verify-email")
+async def verify_email(
+    token_hash: str,
+    type: str,
+    next: Optional[str] = "/",
+    request: Request = None,
+    auth_service: AuthService = Depends(get_service(AuthService))
+):
+    """
+    Verify email using token from email link
+    
+    This endpoint is called when a user clicks the verification link in their email
+    It verifies the OTP token and redirects the user to the specified redirect URL
+    """
+    # Use the auth service to verify the token
+    verification_successful = auth_service.verify_email_token(token_hash, type)
+    
+    # Get the frontend URL from the request or use default
+    frontend_url = request.headers.get("origin", "http://localhost:3000")
+    
+    if verification_successful:
+        # If verification succeeded, redirect to success page
+        redirect_url = f"{frontend_url}{next}"
+    else:
+        # If verification failed, redirect to error page
+        redirect_url = f"{frontend_url}/error"
+    
+    # Return a redirect response
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+async def resend_verification_email(
+    request_data: schemas.ResendVerificationRequest,
+    auth_service: AuthService = Depends(get_service(AuthService))
+):
+    """
+    Resend a verification email to a user
+    
+    Returns success message on success
+    """
+    try:
+        # Use the auth service to resend the verification email
+        auth_service.resend_verification_email(
+            email=request_data.email,
+            redirect_url=request_data.redirect_url
+        )
+        
+        return {
+            "status": "success", 
+            "message": "Verification email sent"
+        }
+    
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error sending verification email: {str(e)}"
         )
