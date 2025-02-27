@@ -36,7 +36,7 @@ class UserResponse(UserBase):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Character schemas
@@ -62,7 +62,7 @@ class CharacterResponse(CharacterBase):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CharacterList(PaginatedResponse):
@@ -93,7 +93,7 @@ class AgentResponse(AgentBase):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class AgentList(PaginatedResponse):
@@ -117,7 +117,7 @@ class ParticipantResponse(ParticipantBase):
     created_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ParticipantDetailResponse(ParticipantResponse):
@@ -126,7 +126,7 @@ class ParticipantDetailResponse(ParticipantResponse):
     agent: Optional[AgentResponse] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Conversation schemas
@@ -167,14 +167,14 @@ class ConversationResponse(ConversationBase):
     updated_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ConversationDetailResponse(ConversationResponse):
     participants: List[ParticipantDetailResponse]
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ConversationList(PaginatedResponse):
@@ -209,7 +209,7 @@ class MessageResponse(BaseModel):
     updated_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class MessageDetailResponse(MessageResponse):
@@ -220,7 +220,7 @@ class MessageDetailResponse(MessageResponse):
     is_ai: bool
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class MessageList(PaginatedResponse):

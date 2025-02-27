@@ -11,6 +11,25 @@ from app.models.user import User
 # Setup security scheme
 security = HTTPBearer()
 
+async def get_access_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> str:
+    """
+    Dependency to extract and optionally verify the access token.
+    Here we verify the token using the AuthService.
+    """
+    auth_service = AuthService(db)
+    try:
+        # Verify token with your auth service; if invalid, this should raise an exception.
+        auth_service.verify_token(credentials.credentials)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid access token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    return credentials.credentials
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security), 
