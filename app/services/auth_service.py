@@ -150,3 +150,58 @@ class AuthService:
     def get_user_by_email(self, email: str) -> Optional[User]:
         """Get a user by email from our database"""
         return self.db.query(User).filter(User.email == email).first()
+
+    def verify_email_token(self, token_hash: str, type: str) -> bool:
+        """
+        Verify an email verification token
+        
+        Args:
+            token_hash: The token hash from the email link
+            type: The type of verification (should be 'email')
+            
+        Returns:
+            True if verification was successful, False otherwise
+        """
+        try:
+            # Verify OTP with Supabase Auth
+            supabase.auth.verify_otp({
+                "token_hash": token_hash,
+                "type": type
+            })
+            
+            return True
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email verification failed: {str(e)}"
+            )
+
+    def resend_verification_email(self, email: str, redirect_url: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Resend a verification email to a user
+        
+        Args:
+            email: User's email address
+            redirect_url: URL to redirect to after verification (optional)
+            
+        Returns:
+            Response from Supabase Auth
+        """
+        try:
+            # Send email verification via Supabase Auth
+            response = supabase.auth.resend_email({
+                "email": email, 
+                "type": "signup",
+                "options": {
+                    "redirect_to": redirect_url
+                } if redirect_url else None
+            })
+            
+            return response
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to send verification email: {str(e)}"
+        )
