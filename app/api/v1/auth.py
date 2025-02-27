@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.api.auth import get_access_token, get_current_user
 from app.database import get_db
 from app.api import schemas
+from app.models.user import User
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_service
 
@@ -96,7 +98,8 @@ async def refresh_token(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout_user(
-    auth_service: AuthService = Depends(get_service(AuthService))
+    auth_service: AuthService = Depends(get_service(AuthService)),
+    token: str = Depends(get_access_token),
 ):
     """
     Sign out and invalidate the token
@@ -104,7 +107,7 @@ async def logout_user(
     Returns no content on success
     """
     try:
-        auth_service.sign_out()
+        auth_service.sign_out(token)
         return None
     except HTTPException as e:
         raise e

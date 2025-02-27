@@ -1,5 +1,5 @@
 # app/services/usage_service.py
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, desc
 from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
@@ -119,9 +119,9 @@ class UsageService:
                 Character.user_id == user_id
             ).scalar() or 0
             
-            conversation_count = self.db.query(func.count(ConversationParticipant.id)).filter(
+            conversation_count = self.db.query(func.count(func.distinct(ConversationParticipant.conversation_id))).filter(
                 ConversationParticipant.user_id == user_id
-            ).distinct(ConversationParticipant.conversation_id).scalar() or 0
+            ).scalar() or 0
             
             message_count = self.db.query(func.count(Message.id)).join(
                 ConversationParticipant, 
@@ -130,18 +130,20 @@ class UsageService:
                 ConversationParticipant.user_id == user_id
             ).scalar() or 0
             
+            UserParticipant = aliased(ConversationParticipant)
+
             ai_response_count = self.db.query(func.count(Message.id)).join(
                 ConversationParticipant, 
                 Message.participant_id == ConversationParticipant.id
-            ).filter(
-                ConversationParticipant.agent_id.isnot(None)
             ).join(
                 Conversation,
                 Message.conversation_id == Conversation.id
             ).join(
-                ConversationParticipant, 
-                (Conversation.id == ConversationParticipant.conversation_id) & 
-                (ConversationParticipant.user_id == user_id)
+                UserParticipant,  # Use the alias here
+                (Conversation.id == UserParticipant.conversation_id) & 
+                (UserParticipant.user_id == user_id)
+            ).filter(
+                ConversationParticipant.agent_id.isnot(None)
             ).scalar() or 0
             
             # Update summary with calculated values

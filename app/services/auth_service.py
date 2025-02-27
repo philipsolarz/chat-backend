@@ -94,7 +94,8 @@ class AuthService:
             return {
                 "access_token": response.session.access_token,
                 "refresh_token": response.session.refresh_token,
-                "user_id": response.user.id
+                "user_id": response.user.id,
+                "email": response.user.email
             }
         
         except Exception as e:
@@ -123,7 +124,8 @@ class AuthService:
             payload = jwt.decode(
                 token, 
                 self.settings.SUPABASE_JWT_SECRET, 
-                algorithms=["HS256"]
+                algorithms=["HS256"],
+                audience="authenticated"
             )
             
             # Extract user ID from payload
