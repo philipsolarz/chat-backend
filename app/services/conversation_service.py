@@ -269,12 +269,24 @@ class ConversationService:
         result = []
         for p in participants:
             participant_info = {
-                "participant_id": p.id,
+                "id": p.id,
+                "conversation_id": p.conversation_id,
+                "character_id": p.character_id,
+                "created_at": p.created_at,
+                "user_id": p.user_id,
+                "agent_id": p.agent_id,
                 "character": p.character,
                 "user": p.user,
                 "agent": p.agent,
-                "type": "user" if p.user_id else "agent"
+                "type": "user" if p.user_id else "agent"  # Keep this for additional context
             }
+            # participant_info = {
+            #     "participant_id": p.id,
+            #     "character": p.character,
+            #     "user": p.user,
+            #     "agent": p.agent,
+            #     "type": "user" if p.user_id else "agent"
+            # }
             result.append(participant_info)
             
         return result
