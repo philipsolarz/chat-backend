@@ -367,3 +367,44 @@ class ZoneService:
         self.db.commit()
         
         return True
+    
+    def count_agents_in_zone(self, zone_id: str) -> int:
+        """Count the number of agents in a zone"""
+        from app.models.agent import Agent
+        return self.db.query(func.count(Agent.id)).filter(Agent.zone_id == zone_id).scalar() or 0
+
+    def can_add_agent_to_zone(self, zone_id: str) -> bool:
+        """Check if a zone has reached its agent limit"""
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return False
+            
+        agent_count = self.count_agents_in_zone(zone_id)
+        return agent_count < zone.total_agent_limit
+
+    def get_zone_agent_limits(self, zone_id: str) -> Dict[str, Any]:
+        """Get agent limit information for a zone"""
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return None
+            
+        agent_count = self.count_agents_in_zone(zone_id)
+        
+        return {
+            "agent_count": agent_count,
+            "base_limit": zone.agent_limit,
+            "upgrades_purchased": zone.agent_limit_upgrades,
+            "total_limit": zone.total_agent_limit,
+            "remaining_capacity": zone.total_agent_limit - agent_count
+        }
+
+    def upgrade_zone_agent_limit(self, zone_id: str) -> bool:
+        """Increase a zone's agent limit by purchasing an upgrade"""
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return False
+            
+        zone.agent_limit_upgrades += 1
+        self.db.commit()
+        
+        return True

@@ -26,6 +26,10 @@ class Zone(Base, TimestampMixin):
     # Zone properties (could be JSON in a real implementation)
     properties = Column(Text, nullable=True)
     
+    # Agent limit configuration
+    agent_limit = Column(Integer, default=25)  # Default limit of 25 agents
+    agent_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
+    
     # Foreign keys for relationships
     world_id = Column(String(36), ForeignKey("worlds.id"), nullable=False, index=True)
     parent_zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True, index=True)
@@ -45,3 +49,8 @@ class Zone(Base, TimestampMixin):
     
     def __repr__(self):
         return f"<Zone {self.id} - {self.name} (World: {self.world_id})>"
+    
+    @property
+    def total_agent_limit(self):
+        """Calculate total agent limit with upgrades"""
+        return self.agent_limit + (self.agent_limit_upgrades * 10)
