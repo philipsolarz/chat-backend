@@ -40,6 +40,12 @@ class User(Base, TimestampMixin):
     subscriptions = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan")
     daily_usage = relationship("UserDailyUsage", back_populates="user", cascade="all, delete-orphan")
     usage_summary = relationship("UserUsageSummary", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    owned_worlds = relationship("World", back_populates="owner", foreign_keys="World.owner_id", cascade="all, delete-orphan")
+    joined_worlds = relationship(
+        "World",
+        secondary="world_members",
+        back_populates="members"
+    )
     
     def __repr__(self):
         return f"<User {self.id} - {self.email}>"

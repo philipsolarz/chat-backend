@@ -27,6 +27,12 @@ class Character(Base, TimestampMixin):
     # User relationship (can be null for system-created public characters)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     
+    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    world = relationship("World", back_populates="characters")
+
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    zone = relationship("Zone", back_populates="characters")
+
     # Relationships
     user = relationship("User", back_populates="characters")
     

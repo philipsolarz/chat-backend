@@ -304,3 +304,148 @@ class SearchResults(BaseModel):
     conversations: List[SearchResultItem] = []
     messages: List[SearchResultItem] = []
     total_results: int
+
+# Add these schemas to app/api/schemas.py
+
+# World schemas
+class WorldBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    genre: Optional[str] = None
+    settings: Optional[str] = None
+    default_prompt: Optional[str] = None
+    is_public: bool = False
+
+
+class WorldCreate(WorldBase):
+    is_premium: bool = False
+
+
+class PremiumWorldCreate(WorldBase):
+    """Schema for initiating premium world creation (which requires payment)"""
+    pass
+
+
+class WorldUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    genre: Optional[str] = None
+    settings: Optional[str] = None
+    default_prompt: Optional[str] = None
+    is_public: Optional[bool] = None
+    is_premium: Optional[bool] = None
+
+
+class WorldResponse(WorldBase):
+    id: str
+    owner_id: Optional[str] = None
+    is_starter: bool
+    is_premium: bool
+    price: Optional[float] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WorldDetailResponse(WorldResponse):
+    member_count: int
+    
+    class Config:
+        from_attributes = True
+
+
+class WorldList(PaginatedResponse):
+    items: List[WorldResponse]
+
+# Zone schemas
+class ZoneBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    zone_type: Optional[str] = None
+    coordinates: Optional[str] = None
+    properties: Optional[str] = None
+
+
+class ZoneCreate(ZoneBase):
+    world_id: str
+    parent_zone_id: Optional[str] = None
+
+
+class ZoneUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    zone_type: Optional[str] = None
+    coordinates: Optional[str] = None
+    properties: Optional[str] = None
+    parent_zone_id: Optional[str] = None
+
+
+class ZoneResponse(ZoneBase):
+    id: str
+    world_id: str
+    parent_zone_id: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class ZoneDetailResponse(ZoneResponse):
+    sub_zone_count: int
+    character_count: int
+    agent_count: int
+    
+    class Config:
+        from_attributes = True
+
+
+class ZoneList(PaginatedResponse):
+    items: List[ZoneResponse]
+
+
+class ZoneTreeNode(ZoneResponse):
+    sub_zones: List['ZoneTreeNode'] = []
+    
+    class Config:
+        from_attributes = True
+
+
+# Add this to enable recursive typing for ZoneTreeNode
+ZoneTreeNode.update_forward_refs()
+
+
+class ZoneHierarchyResponse(BaseModel):
+    zones: List[ZoneTreeNode]
+
+
+# Update character schemas to include zone information
+class CharacterCreate(CharacterBase):
+    world_id: str
+    zone_id: Optional[str] = None
+
+
+class CharacterResponse(CharacterBase):
+    id: str
+    user_id: Optional[str] = None
+    world_id: str
+    zone_id: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Update agent schemas to include zone information
+class AgentCreate(AgentBase):
+    zone_id: Optional[str] = None
+
+
+class AgentResponse(AgentBase):
+    id: str
+    is_active: bool
+    zone_id: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
