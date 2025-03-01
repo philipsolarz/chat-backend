@@ -430,7 +430,7 @@ async def create_zone_upgrade_checkout(
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Error creating zone upgrade checkout: {str(e)}")
+        # logger.error(f"Error creating zone upgrade checkout: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session"
