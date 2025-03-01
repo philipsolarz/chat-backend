@@ -1,15 +1,16 @@
 # app/ai/agent_manager.py
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
 from datetime import datetime
 
 from app.config import get_settings
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
+from app.services.character_service import CharacterService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -24,6 +25,7 @@ class AgentManager:
         self.db = db
         self.message_service = MessageService(db)
         self.conversation_service = ConversationService(db)
+        self.character_service = CharacterService(db)
         self.settings = get_settings()
     
     async def generate_response(self, participant_id: str) -> Optional[str]:
@@ -84,6 +86,67 @@ class AgentManager:
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}")
             return None
+    
+    async def transform_message(self, message: str, character_id: str) -> Optional[str]:
+        """
+        Transform a message based on character personality
+        
+        Args:
+            message: The original message text
+            character_id: The ID of the character to use for transformation
+            
+        Returns:
+            The transformed message text or None if transformation failed
+        """
+        try:
+            # Get the character
+            character = self.character_service.get_character(character_id)
+            if not character:
+                logger.error(f"Character {character_id} not found")
+                return message
+            
+            # Skip transformation if the message is empty
+            if not message or message.strip() == "":
+                return "..."
+            
+            # Get character template from character description
+            description = character.description or ""
+            name = character.name
+            
+            # Build prompt for character transformation
+            prompt = f"""
+You are {name}, {description}.
+
+Rewrite the following message as if {name} is saying it, maintaining the essential meaning but adapting the style, vocabulary, and tone to match {name}'s personality.
+
+Original message: "{message}"
+
+Transformed message:
+"""
+            
+            # Call OpenAI API for transformation
+            chat_model = ChatOpenAI(
+                model_name=self.settings.AI_MODEL_NAME,
+                openai_api_key=self.settings.OPENAI_API_KEY,
+                temperature=0.7
+            )
+            
+            # Create messages for the API
+            messages = [SystemMessage(content=prompt)]
+            
+            # Generate transformed message
+            response = chat_model.predict_messages(messages)
+            transformed_message = response.content.strip()
+            
+            if not transformed_message:
+                logger.warning("Transformation returned empty result, falling back to original message")
+                return message
+                
+            logger.info(f"Transformed message: {transformed_message}")
+            return transformed_message
+        except Exception as e:
+            logger.error(f"Error transforming message: {str(e)}")
+            return message  # Fall back to original message on error
     
     async def _generate_with_langchain(self, 
                                       agent: Any, 
@@ -157,10 +220,10 @@ Keep your responses conversational and appropriate to the context."""
         
         # Generate responses from all agent participants
         for agent_participant in agent_participants:
-            participant_id = agent_participant["participant_id"]
+            agent_participant_id = agent_participant["participant_id"]
             
             # Generate response
-            response_text = await self.generate_response(participant_id)
+            response_text = await self.generate_response(agent_participant_id)
             
             if response_text:
                 # Get the latest message from this participant
@@ -170,12 +233,12 @@ Keep your responses conversational and appropriate to the context."""
                 
                 # Find the message that was just created
                 recent_messages = self.message_service.get_recent_messages(conversation_id, limit=5)
-                message = next((m for m in recent_messages if m.participant_id == participant_id), None)
+                message = next((m for m in recent_messages if m.participant_id == agent_participant_id), None)
                 
                 if message:
                     responses.append({
                         "message_id": message.id,
-                        "participant_id": participant_id,
+                        "participant_id": agent_participant_id,
                         "character_id": character.id,
                         "character_name": character.name,
                         "agent_id": agent.id,

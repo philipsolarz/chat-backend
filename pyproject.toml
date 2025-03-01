@@ -14,4 +14,5 @@ dependencies = [
     "sqlalchemy>=2.0.38",
     "supabase>=2.13.0",
     "stripe>=11.6.0",
+    "openai>=1.65.1",
 ]
