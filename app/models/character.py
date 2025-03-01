@@ -17,6 +17,10 @@ class Character(Base, TimestampMixin):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)  # Includes personality description
     
+    # New fields for character templates
+    template = Column(Text, nullable=True)  # Character template for AI voice
+    is_template = Column(Boolean, default=False)  # Whether this is a template character
+    
     # Whether the character is publicly available for agents
     is_public = Column(Boolean, default=False)
     

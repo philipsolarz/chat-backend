@@ -65,6 +65,15 @@ async def websocket_endpoint(
     access_token: str,
     db: Session = Depends(get_db)
 ):
+    """
+    WebSocket endpoint for real-time chat with character voice transformation
+    
+    Args:
+        websocket: WebSocket connection
+        conversation_id: ID of the conversation to join
+        participant_id: ID of the participant using the connection
+        access_token: JWT authentication token
+    """
     await handle_websocket_connection(
         websocket=websocket,
         conversation_id=conversation_id,
@@ -72,43 +81,6 @@ async def websocket_endpoint(
         token=access_token,
         db=db
     )
-    # auth_service = AuthService(db)
-    # if not auth_service.verify_token(access_token):
-    #     await websocket.close(code=1008)
-    #     return
-    
-    # await manager.connect(websocket, conversation_id, participant_id)
-    # try:
-    #     while True:
-    #         data = await websocket.receive_text()
-    #         # Broadcast the received message to all connected clients
-    #         await manager.broadcast(f"Client says: {data}")
-    # except WebSocketDisconnect:
-    #     manager.disconnect(websocket)
-    #     await manager.broadcast("A client disconnected")
-
-# @app.websocket("/ws/conversations/{conversation_id}")
-# async def websocket_endpoint(
-#     websocket: WebSocket, 
-#     conversation_id: str,
-#     token: str,
-#     participant_id: str = None
-# ):
-#     """
-#     WebSocket endpoint for real-time chat
-    
-#     Args:
-#         websocket: WebSocket connection
-#         conversation_id: ID of the conversation to join
-#         token: JWT authentication token
-#         participant_id: Optional ID of the participant the user is using
-#     """
-#     await handle_websocket_connection(
-#         websocket=websocket,
-#         conversation_id=conversation_id,
-#         token=token,
-#         participant_id=participant_id
-#     )
 
 @app.get("/chat")
 async def get():
