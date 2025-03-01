@@ -12,6 +12,21 @@ from app.ai.agent_manager import AgentManager
 
 logger = logging.getLogger(__name__)
 
+# Standalone helper function for sending usage updates
+async def send_usage_update(websocket: WebSocket, usage_service: UsageService, user_id: str):
+    """Send updated usage info to the client"""
+    usage_info = {
+        "can_send_messages": usage_service.can_send_message(user_id),
+        "messages_remaining_today": usage_service.get_remaining_daily_messages(user_id),
+        "is_premium": usage_service.payment_service.is_premium(user_id)
+    }
+    payload = {
+        "type": "usage_update",
+        "usage": usage_info,
+        "timestamp": datetime.now().isoformat()
+    }
+    await websocket.send_json(payload)
+
 class EventDispatcher:
     """Dispatches WebSocket events to appropriate handlers based on event type"""
     
@@ -88,7 +103,7 @@ class EventRegistry:
         usage_service: UsageService,
         agent_manager: Optional[AgentManager] = None
     ):
-        """Handle a chat message event"""
+        """Handle a chat message event with PydanticAI integration"""
         # First check if user can send messages
         if not usage_service.can_send_message(user_id):
             await websocket.send_json({
@@ -108,31 +123,41 @@ class EventRegistry:
             })
             return
             
-        # Transform message based on character if agent_manager is available
+        # Get participant info to retrieve character for transformation
+        from app.services.conversation_service import ConversationService
+        from app.database import get_db
+        
+        conversation_service = ConversationService(next(get_db()))
+        participant = conversation_service.get_participant(participant_id)
+        
+        if not participant:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Participant not found",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Apply character voice transformation using PydanticAI
         transformed_content = content
-        if agent_manager and participant_id:
-            from app.services.conversation_service import ConversationService
-            from app.database import get_db
-            
-            # Get the participant to find the character
-            conversation_service = ConversationService(next(get_db()))
-            participant = conversation_service.get_participant(participant_id)
-            
-            if participant and participant.character_id:
-                try:
-                    transformed_content = await agent_manager.transform_message(
-                        content, participant.character_id
-                    )
-                    if not transformed_content:
-                        transformed_content = content  # Fallback
-                except Exception as e:
-                    logger.error(f"Error transforming message: {str(e)}")
-                    # Continue with original content
-
-        # Track message in usage
+        if agent_manager and participant.character_id:
+            try:
+                # Use the PydanticAI-based transformation
+                transformed_content = await agent_manager.transform_message(content, participant.character_id)
+                if not transformed_content:
+                    transformed_content = content  # Fallback if transformation fails
+                    
+                # Track transformation attempt in logs
+                logger.info(f"PydanticAI transformation applied: '{content}' -> '{transformed_content}'")
+                
+            except Exception as e:
+                logger.error(f"Error during PydanticAI message transformation: {str(e)}")
+                # Continue with original content if transformation fails
+        
+        # Track message in usage service
         usage_service.track_message_sent(user_id, is_from_ai=False)
         
-        # Create the message
+        # Create the message with transformed content
         db_message = message_service.create_message(
             conversation_id=conversation_id,
             participant_id=participant_id,
@@ -140,11 +165,7 @@ class EventRegistry:
         )
         
         if db_message:
-            # Get sender info
             sender_info = message_service.get_sender_info(db_message)
-            
-            # Broadcast the message
-            from app.websockets.connection_manager import connection_manager
             message_payload = {
                 "type": "message",
                 "message": {
@@ -160,15 +181,16 @@ class EventRegistry:
                 },
                 "timestamp": datetime.now().isoformat()
             }
+            
+            from app.websockets.connection_manager import connection_manager
             await connection_manager.broadcast_to_conversation(conversation_id, message_payload)
+            await send_usage_update(websocket, usage_service, user_id)
             
-            # Update usage info
-            await self.send_usage_update(websocket, usage_service, user_id)
-            
-            # Process AI responses if agent_manager is available
+            # Process AI agent responses in the background using PydanticAI
             if agent_manager:
+                # Make sure to call the method with self
                 asyncio.create_task(self.process_ai_responses(
-                    agent_manager=agent_manager,
+                    agent_manager=agent_manager, 
                     conversation_id=conversation_id,
                     participant_id=participant_id,
                     user_id=user_id,
@@ -180,7 +202,8 @@ class EventRegistry:
                 "error": "Failed to create message",
                 "timestamp": datetime.now().isoformat()
             })
-    
+
+    # Make process_ai_responses a method of EventRegistry
     async def process_ai_responses(
         self,
         agent_manager: AgentManager,
@@ -189,9 +212,9 @@ class EventRegistry:
         user_id: str,
         usage_service: UsageService
     ):
-        """Process AI agent responses in the background"""
+        """Process AI agent responses in the background using PydanticAI"""
         try:
-            # Get responses from AI agents
+            # Using PydanticAI-based agent manager to generate responses
             responses = await agent_manager.process_new_message(
                 conversation_id=conversation_id,
                 participant_id=participant_id
@@ -200,8 +223,10 @@ class EventRegistry:
             # Track AI responses in usage
             for _ in responses:
                 usage_service.track_message_sent(user_id, is_from_ai=True)
+                
+            logger.info(f"Generated {len(responses)} AI responses using PydanticAI")
         except Exception as e:
-            logger.error(f"Error processing AI responses: {str(e)}")
+            logger.error(f"Error processing AI responses with PydanticAI: {str(e)}")
     
     async def handle_typing_event(
         self,
@@ -251,7 +276,7 @@ class EventRegistry:
         **kwargs
     ):
         """Handle a usage check event"""
-        await self.send_usage_update(websocket, usage_service, user_id)
+        await send_usage_update(websocket, usage_service, user_id)
     
     async def handle_ping_event(
         self,
@@ -263,25 +288,6 @@ class EventRegistry:
             "type": "pong",
             "timestamp": datetime.now().isoformat()
         })
-    
-    async def send_usage_update(
-        self, 
-        websocket: WebSocket, 
-        usage_service: UsageService, 
-        user_id: str
-    ):
-        """Send updated usage info to the client"""
-        usage_info = {
-            "can_send_messages": usage_service.can_send_message(user_id),
-            "messages_remaining_today": usage_service.get_remaining_daily_messages(user_id),
-            "is_premium": usage_service.payment_service.is_premium(user_id)
-        }
-        payload = {
-            "type": "usage_update",
-            "usage": usage_info,
-            "timestamp": datetime.now().isoformat()
-        }
-        await websocket.send_json(payload)
     
     async def handle_read_event(
         self,
