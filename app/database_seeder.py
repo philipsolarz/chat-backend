@@ -7,7 +7,9 @@ from app.database import SessionLocal, engine, Base
 from app.models.character import Character
 from app.models.subscription import SubscriptionPlan
 from app.models.agent import Agent
+from app.models.world import World
 from app.config import get_settings
+from app.models.zone import Zone
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -241,7 +243,400 @@ Each response should emphasize Krag's physical strength, direct approach to prob
     
     return templates
 
-# Update the seed_database function to include character templates
+def seed_starter_worlds(db: Session) -> List[World]:
+    """Seed the database with starter worlds"""
+    
+    # Check if starter worlds already exist
+    existing_starters = db.query(World).filter(World.is_starter == True).all()
+    if existing_starters:
+        logger.info(f"Found {len(existing_starters)} existing starter worlds")
+        return existing_starters
+    
+    # Create starter worlds
+    worlds = []
+    
+    # Fantasy world
+    fantasy = World(
+        name="Eldoria",
+        description="A high fantasy realm of magic, dragons, and epic quests. Eldoria is home to diverse races including humans, elves, dwarves, and magical creatures.",
+        genre="Fantasy",
+        settings="""
+{
+    "magic_level": "high",
+    "technology_level": "medieval",
+    "races": ["humans", "elves", "dwarves", "orcs", "halflings"],
+    "major_regions": ["The Northern Kingdoms", "Elven Forests", "Dwarven Mountains", "The Mystical Isles"]
+}""",
+        default_prompt="""
+You are in Eldoria, a high fantasy realm where magic flows through the very air and epic quests await brave adventurers. 
+Dragons soar through the skies, ancient ruins hide forgotten treasures, and the forces of darkness gather in the shadows.
+Characters in this world should speak and act according to fantasy tropes and medieval customs.
+""",
+        is_starter=True,
+        is_public=True
+    )
+    worlds.append(fantasy)
+    
+    # Sci-Fi world
+    scifi = World(
+        name="Nova Prime",
+        description="A futuristic sci-fi universe with interstellar travel, advanced technology, and alien civilizations spread across the galaxy.",
+        genre="Science Fiction",
+        settings="""
+{
+    "tech_level": "advanced",
+    "ftl_travel": true,
+    "alien_races": 12,
+    "major_factions": ["Terran Alliance", "Zorn Collective", "Free Traders Guild", "The Ancient Ones"]
+}""",
+        default_prompt="""
+You are in Nova Prime, a vast sci-fi universe in the year 3752 CE. Humanity has spread among the stars, encountering numerous alien civilizations.
+Faster-than-light travel is common, AI companions are ubiquitous, and genetic engineering has created specialized human variants.
+Characters should reference advanced technology, space travel, and the complex political landscape of competing interstellar factions.
+""",
+        is_starter=True,
+        is_public=True
+    )
+    worlds.append(scifi)
+    
+    # Post-apocalyptic world
+    postapoc = World(
+        name="Wasteland",
+        description="A gritty post-apocalyptic world where survivors struggle to rebuild civilization after a global catastrophe.",
+        genre="Post-Apocalyptic",
+        settings="""
+{
+    "apocalypse_type": "nuclear war",
+    "years_since_fall": 87,
+    "radiation_zones": ["Dead Cities", "The Glowing Sea"],
+    "factions": ["Survivors Union", "Raiders", "The New Government", "Mutant Collective"]
+}""",
+        default_prompt="""
+You are in the Wasteland, 87 years after nuclear war devastated civilization. Resources are scarce, dangers lurk everywhere,
+and different factions fight for control of what remains. Radiation has mutated some creatures and humans, creating new threats.
+Characters should be hardened by the harsh reality of survival, referencing scavenging, makeshift weapons and armor, and the constant
+struggle to find clean water, food, and supplies.
+""",
+        is_starter=True,
+        is_public=True
+    )
+    worlds.append(postapoc)
+    
+    # Modern supernatural world
+    supernatural = World(
+        name="Shadow Veil",
+        description="A modern world where supernatural creatures exist in the shadows of human society. Vampires run nightclubs, werewolves live in the forests, and witches practice their craft in secret.",
+        genre="Urban Fantasy",
+        settings="""
+{
+    "time_period": "modern day",
+    "supernatural_types": ["vampires", "werewolves", "witches", "fae", "ghosts"],
+    "magic_visibility": "hidden from most humans",
+    "major_locations": ["Crescent City", "The Undermarket", "Fae Realms"]
+}""",
+        default_prompt="""
+You are in Shadow Veil, a world identical to modern Earth but with a secret supernatural society hidden from human eyes.
+Vampires control nightlife businesses, werewolves protect wilderness areas, witches form covens in urban areas, and fae creatures
+slip between our world and theirs. Characters should reference modern technology alongside supernatural abilities and the
+careful balance between the mundane world and the supernatural one.
+""",
+        is_starter=True,
+        is_public=True
+    )
+    worlds.append(supernatural)
+    
+    # Add worlds to database
+    for world in worlds:
+        db.add(world)
+    
+    db.commit()
+    
+    logger.info(f"Created {len(worlds)} starter worlds")
+    return worlds
+
+def seed_starter_zones(db: Session) -> List[Zone]:
+    """Seed the database with starter zones for each starter world"""
+    
+    # Check if starter worlds have zones already
+    existing_zones = db.query(Zone).join(World).filter(World.is_starter == True).all()
+    if existing_zones:
+        logger.info(f"Found {len(existing_zones)} existing zones in starter worlds")
+        return existing_zones
+    
+    # Get all starter worlds
+    starter_worlds = db.query(World).filter(World.is_starter == True).all()
+    if not starter_worlds:
+        logger.info("No starter worlds found to add zones to")
+        return []
+    
+    # Creating zones for each world
+    zones = []
+    
+    for world in starter_worlds:
+        if world.name == "Eldoria": # Fantasy world
+            # Create top-level zones
+            capital = Zone(
+                name="Eldoria Capital",
+                description="The grand capital city of Eldoria, with towering spires, magical academies, and bustling markets.",
+                zone_type="city",
+                world_id=world.id
+            )
+            zones.append(capital)
+            
+            northern_wilds = Zone(
+                name="Northern Wilds",
+                description="A vast region of untamed forests, mountains, and valleys, home to dangerous creatures and hidden treasures.",
+                zone_type="wilderness",
+                world_id=world.id
+            )
+            zones.append(northern_wilds)
+            
+            elven_forest = Zone(
+                name="Silverleaf Forest",
+                description="Ancient forest realm of the elves, with trees older than human civilization and magical glades.",
+                zone_type="forest",
+                world_id=world.id
+            )
+            zones.append(elven_forest)
+            
+            dwarven_halls = Zone(
+                name="Irondeep Mountains",
+                description="Mountain range containing the legendary dwarven kingdom with vast mines and forges.",
+                zone_type="mountains",
+                world_id=world.id
+            )
+            zones.append(dwarven_halls)
+            
+            # Add to database to get IDs
+            for zone in zones:
+                db.add(zone)
+            db.flush()
+            
+            # Create sub-zones
+            zones.append(Zone(
+                name="Royal Palace",
+                description="Home of the human king and center of government.",
+                zone_type="building",
+                world_id=world.id,
+                parent_zone_id=capital.id
+            ))
+            
+            zones.append(Zone(
+                name="Merchant District",
+                description="Bustling commercial area with shops, markets and guilds.",
+                zone_type="district",
+                world_id=world.id,
+                parent_zone_id=capital.id
+            ))
+            
+            zones.append(Zone(
+                name="Arcane University",
+                description="Prestigious magical academy where mages study ancient arts.",
+                zone_type="building",
+                world_id=world.id,
+                parent_zone_id=capital.id
+            ))
+            
+            zones.append(Zone(
+                name="Frost Peaks",
+                description="Dangerous, snow-covered mountains home to frost giants and white dragons.",
+                zone_type="mountains",
+                world_id=world.id,
+                parent_zone_id=northern_wilds.id
+            ))
+            
+            zones.append(Zone(
+                name="Mistwood",
+                description="Foggy forest where the veil between realms is thin and fae creatures appear.",
+                zone_type="forest",
+                world_id=world.id,
+                parent_zone_id=northern_wilds.id
+            ))
+            
+        elif world.name == "Nova Prime": # Sci-fi world
+            # Create top-level zones
+            central_hub = Zone(
+                name="Nexus Station",
+                description="Massive space station serving as the administrative center of the Terran Alliance.",
+                zone_type="space_station",
+                world_id=world.id
+            )
+            zones.append(central_hub)
+            
+            earth_system = Zone(
+                name="Sol System",
+                description="Birthplace of humanity, now a densely populated core system with Earth as its jewel.",
+                zone_type="star_system",
+                world_id=world.id
+            )
+            zones.append(earth_system)
+            
+            frontier = Zone(
+                name="The Frontier",
+                description="Newly discovered systems on the edge of known space, largely unexplored and dangerous.",
+                zone_type="region",
+                world_id=world.id
+            )
+            zones.append(frontier)
+            
+            alien_territory = Zone(
+                name="Zorn Collective Space",
+                description="Territory controlled by the technologically advanced Zorn species.",
+                zone_type="region",
+                world_id=world.id
+            )
+            zones.append(alien_territory)
+            
+            # Add to database to get IDs
+            for zone in zones:
+                db.add(zone)
+            db.flush()
+            
+            # Create sub-zones
+            zones.append(Zone(
+                name="Command Section",
+                description="Military and administrative heart of Nexus Station.",
+                zone_type="section",
+                world_id=world.id,
+                parent_zone_id=central_hub.id
+            ))
+            
+            zones.append(Zone(
+                name="Trade Hub",
+                description="Commercial center where merchants from across the galaxy conduct business.",
+                zone_type="section",
+                world_id=world.id,
+                parent_zone_id=central_hub.id
+            ))
+            
+            zones.append(Zone(
+                name="Earth",
+                description="Humanity's homeworld, now a carefully preserved planet with limited population.",
+                zone_type="planet",
+                world_id=world.id,
+                parent_zone_id=earth_system.id
+            ))
+            
+            zones.append(Zone(
+                name="Mars Colony",
+                description="First human settlement beyond Earth, now a thriving industrial center.",
+                zone_type="planet",
+                world_id=world.id,
+                parent_zone_id=earth_system.id
+            ))
+            
+        elif world.name == "Wasteland": # Post-apocalyptic world
+            # Create top-level zones
+            haven = Zone(
+                name="Haven",
+                description="The largest survivor settlement, built within the ruins of an old sports stadium.",
+                zone_type="settlement",
+                world_id=world.id
+            )
+            zones.append(haven)
+            
+            dead_city = Zone(
+                name="Dead City",
+                description="Ruins of a major pre-war metropolis, highly radioactive but filled with valuable tech.",
+                zone_type="ruins",
+                world_id=world.id
+            )
+            zones.append(dead_city)
+            
+            wastes = Zone(
+                name="The Great Wastes",
+                description="Vast desert-like region where survival is nearly impossible due to radiation and lack of water.",
+                zone_type="wasteland",
+                world_id=world.id
+            )
+            zones.append(wastes)
+            
+            # Add to database to get IDs
+            for zone in zones:
+                db.add(zone)
+            db.flush()
+            
+            # Create sub-zones
+            zones.append(Zone(
+                name="Market District",
+                description="Central trading area where survivors barter goods.",
+                zone_type="district",
+                world_id=world.id,
+                parent_zone_id=haven.id
+            ))
+            
+            zones.append(Zone(
+                name="The Wall",
+                description="Defensive perimeter of Haven, constantly guarded against raiders.",
+                zone_type="fortification",
+                world_id=world.id,
+                parent_zone_id=haven.id
+            ))
+            
+            zones.append(Zone(
+                name="Downtown Ruins",
+                description="Former financial district, now a labyrinth of collapsed skyscrapers.",
+                zone_type="ruins",
+                world_id=world.id,
+                parent_zone_id=dead_city.id
+            ))
+            
+        elif world.name == "Shadow Veil": # Urban fantasy world
+            # Create top-level zones
+            city = Zone(
+                name="Crescent City",
+                description="A modern metropolis where supernatural creatures hide in plain sight among humans.",
+                zone_type="city",
+                world_id=world.id
+            )
+            zones.append(city)
+            
+            otherside = Zone(
+                name="The Veil",
+                description="The supernatural realm that overlaps with the human world, accessible only to magical beings.",
+                zone_type="realm",
+                world_id=world.id
+            )
+            zones.append(otherside)
+            
+            # Add to database to get IDs
+            for zone in zones:
+                db.add(zone)
+            db.flush()
+            
+            # Create sub-zones
+            zones.append(Zone(
+                name="Midnight District",
+                description="Downtown area with high supernatural population, featuring clubs, bars, and magical shops.",
+                zone_type="district",
+                world_id=world.id,
+                parent_zone_id=city.id
+            ))
+            
+            zones.append(Zone(
+                name="Fae Court",
+                description="Magical realm within The Veil where the fae nobility resides.",
+                zone_type="realm",
+                world_id=world.id,
+                parent_zone_id=otherside.id
+            ))
+            
+            zones.append(Zone(
+                name="Shadow Market",
+                description="Hidden supernatural marketplace accessible only through secret entrances.",
+                zone_type="market",
+                world_id=world.id,
+                parent_zone_id=city.id
+            ))
+    
+    # Save all zones
+    db.commit()
+    
+    total_created = len(zones)
+    logger.info(f"Created {total_created} zones across {len(starter_worlds)} starter worlds")
+    return zones
+
+# Update the seed_database function to include zones
 def seed_database():
     """Seed the database with initial data"""
     logger.info("Starting database seeding...")
@@ -261,6 +656,12 @@ def seed_database():
         
         # Seed character templates
         seed_character_templates(db)
+        
+        # Seed starter worlds
+        seed_starter_worlds(db)
+        
+        # Seed starter zones
+        seed_starter_zones(db)
         
         logger.info("Database seeding completed successfully")
     

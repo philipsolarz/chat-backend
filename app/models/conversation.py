@@ -12,7 +12,8 @@ class Conversation(Base, TimestampMixin):
     
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
     title = Column(String(100), nullable=True)  # Optional title for the conversation
-    
+    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    world = relationship("World", back_populates="conversations")
     # Relationships
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     participants = relationship("ConversationParticipant", back_populates="conversation", cascade="all, delete-orphan")

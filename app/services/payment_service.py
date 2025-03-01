@@ -357,3 +357,282 @@ class PaymentService:
         """
         user = self.user_service.get_user(user_id)
         return user is not None and user.is_premium
+    
+    def create_premium_world_checkout(self, 
+                                    user_id: str, 
+                                    world_data: Dict[str, Any],
+                                    success_url: str, 
+                                    cancel_url: str,
+                                    price: float = 249.99) -> str:
+        """
+        Create a Stripe checkout session for premium world purchase
+        
+        Args:
+            user_id: User ID
+            world_data: Data about the world to be created after payment
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD (defaults to $249.99)
+                
+        Returns:
+            Checkout session URL
+        """
+        # Get user
+        user = self.user_service.get_user(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        try:
+            # Check if user already has a Stripe customer ID
+            stripe_customer_id = None
+            existing_subscription = self.get_user_subscription(user_id)
+            
+            if existing_subscription and existing_subscription.stripe_customer_id:
+                stripe_customer_id = existing_subscription.stripe_customer_id
+            
+            # Create a new Stripe customer if needed
+            if not stripe_customer_id:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.display_name,
+                    metadata={"user_id": user.id}
+                )
+                stripe_customer_id = customer.id
+            
+            # Create price object for one-time purchase
+            price_obj = stripe.Price.create(
+                unit_amount=int(price * 100),  # Convert to cents
+                currency="usd",
+                product_data={
+                    "name": f"Premium World: {world_data.get('world_name', 'Custom World')}",
+                    "description": "One-time purchase for a premium world creation"
+                }
+            )
+            
+            # Create checkout session
+            checkout_session = stripe.checkout.Session.create(
+                customer=stripe_customer_id,
+                payment_method_types=["card"],
+                line_items=[{
+                    "price": price_obj.id,
+                    "quantity": 1
+                }],
+                mode="payment",  # one-time payment
+                success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=cancel_url,
+                metadata={
+                    "user_id": user.id,
+                    "product_type": "premium_world",
+                    # Store world data in metadata (limited to what fits)
+                    "world_name": world_data.get("world_name", ""),
+                    "world_description": world_data.get("world_description", "")[:100] if world_data.get("world_description") else "",
+                    "world_genre": world_data.get("world_genre", "")
+                }
+            )
+            
+            return checkout_session.url
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            raise ValueError(f"Payment processing error: {str(e)}")
+
+
+    def handle_premium_world_checkout_completed(self, session_id: str) -> Optional[str]:
+        """
+        Handle completed checkout session for premium world
+        
+        Args:
+            session_id: Stripe checkout session ID
+            
+        Returns:
+            ID of the created world, or None if failed
+        """
+        try:
+            # Get checkout session
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            # Check if this is a premium world purchase
+            if session.metadata.get("product_type") != "premium_world":
+                logger.error(f"Not a premium world checkout: {session_id}")
+                return None
+            
+            # Get user ID from metadata
+            user_id = session.metadata.get("user_id")
+            
+            if not user_id:
+                logger.error(f"User ID not found in session metadata: {session_id}")
+                return None
+            
+            # Get user
+            user = self.user_service.get_user(user_id)
+            if not user:
+                logger.error(f"User not found: {user_id}")
+                return None
+            
+            # Create the premium world
+            from app.services.world_service import WorldService
+            world_service = WorldService(self.db)
+            
+            world = world_service.create_world(
+                owner_id=user_id,
+                name=session.metadata.get("world_name", "Premium World"),
+                description=session.metadata.get("world_description", ""),
+                genre=session.metadata.get("world_genre", ""),
+                is_premium=True,
+                price=249.99
+            )
+            
+            if not world:
+                logger.error(f"Failed to create premium world for user: {user_id}")
+                return None
+            
+            return world.id
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error handling premium world checkout: {str(e)}")
+            return None
+        
+    def create_zone_upgrade_checkout(self, 
+                                user_id: str, 
+                                world_id: str,
+                                success_url: str, 
+                                cancel_url: str,
+                                price: float = 49.99) -> str:
+        """
+        Create a Stripe checkout session for zone limit upgrade
+        
+        Args:
+            user_id: User ID
+            world_id: ID of the world to upgrade
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD (defaults to $49.99)
+                
+        Returns:
+            Checkout session URL
+        """
+        # Get user
+        user = self.user_service.get_user(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        # Get world
+        from app.services.world_service import WorldService
+        world_service = WorldService(self.db)
+        world = world_service.get_world(world_id)
+        
+        if not world:
+            raise ValueError("World not found")
+        
+        # Check if user is the world owner
+        if world.owner_id != user_id:
+            raise ValueError("Only the world owner can purchase zone upgrades")
+        
+        try:
+            # Check if user already has a Stripe customer ID
+            stripe_customer_id = None
+            existing_subscription = self.get_user_subscription(user_id)
+            
+            if existing_subscription and existing_subscription.stripe_customer_id:
+                stripe_customer_id = existing_subscription.stripe_customer_id
+            
+            # Create a new Stripe customer if needed
+            if not stripe_customer_id:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.display_name,
+                    metadata={"user_id": user.id}
+                )
+                stripe_customer_id = customer.id
+            
+            # Create price object for one-time purchase
+            price_obj = stripe.Price.create(
+                unit_amount=int(price * 100),  # Convert to cents
+                currency="usd",
+                product_data={
+                    "name": f"Zone Limit Upgrade: {world.name}",
+                    "description": "Increase zone limit by 100 for your world"
+                }
+            )
+            
+            # Create checkout session
+            checkout_session = stripe.checkout.Session.create(
+                customer=stripe_customer_id,
+                payment_method_types=["card"],
+                line_items=[{
+                    "price": price_obj.id,
+                    "quantity": 1
+                }],
+                mode="payment",  # one-time payment
+                success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=cancel_url,
+                metadata={
+                    "user_id": user.id,
+                    "product_type": "zone_upgrade",
+                    "world_id": world_id
+                }
+            )
+            
+            return checkout_session.url
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            raise ValueError(f"Payment processing error: {str(e)}")
+
+
+    def handle_zone_upgrade_checkout_completed(self, session_id: str) -> Optional[bool]:
+        """
+        Handle completed checkout session for zone limit upgrade
+        
+        Args:
+            session_id: Stripe checkout session ID
+            
+        Returns:
+            True if successful, None if failed
+        """
+        try:
+            # Get checkout session
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            # Check if this is a zone upgrade purchase
+            if session.metadata.get("product_type") != "zone_upgrade":
+                logger.error(f"Not a zone upgrade checkout: {session_id}")
+                return None
+            
+            # Get world ID from metadata
+            world_id = session.metadata.get("world_id")
+            user_id = session.metadata.get("user_id")
+            
+            if not world_id or not user_id:
+                logger.error(f"World ID or User ID not found in session metadata: {session_id}")
+                return None
+            
+            # Verify world and ownership
+            from app.services.world_service import WorldService
+            world_service = WorldService(self.db)
+            
+            world = world_service.get_world(world_id)
+            if not world:
+                logger.error(f"World not found: {world_id}")
+                return None
+                
+            if world.owner_id != user_id:
+                logger.error(f"User {user_id} is not the owner of world {world_id}")
+                return None
+            
+            # Apply the upgrade
+            world.zone_limit_upgrades += 1
+            self.db.commit()
+            
+            logger.info(f"Zone limit upgraded for world {world_id}. New limit: {world.total_zone_limit}")
+            return True
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error handling zone upgrade checkout: {str(e)}")
+            return None

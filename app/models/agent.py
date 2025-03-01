@@ -1,5 +1,5 @@
 # app/models/agent.py
-from sqlalchemy import Column, String, Text, Boolean
+from sqlalchemy import Column, ForeignKey, String, Text, Boolean
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -20,6 +20,9 @@ class Agent(Base, TimestampMixin):
     # Agent system prompt (AI instructions)
     system_prompt = Column(Text, nullable=True)
     
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    zone = relationship("Zone", back_populates="agents")
+
     # Whether the agent is enabled
     is_active = Column(Boolean, default=True)
     
