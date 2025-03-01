@@ -182,10 +182,23 @@ async def stripe_webhook(
         event_type = event["type"]
         
         if event_type == "checkout.session.completed":
-            # Checkout completed, create subscription
+            # Checkout completed, handle based on product type
             session = event["data"]["object"]
-            payment_service.handle_subscription_checkout_completed(session.id)
+            product_type = session.metadata.get("product_type")
             
+            if product_type == "zone_upgrade":
+                # Handle zone upgrade purchase
+                payment_service.handle_zone_upgrade_checkout_completed(session.id)
+            elif product_type == "agent_limit_upgrade":
+                # Handle agent limit upgrade purchase
+                payment_service.handle_agent_limit_upgrade_checkout_completed(session.id)
+            elif product_type == "premium_world":
+                # Handle premium world purchase
+                payment_service.handle_premium_world_checkout_completed(session.id)
+            else:
+                # Regular subscription checkout
+                payment_service.handle_subscription_checkout_completed(session.id)
+        
         elif event_type == "customer.subscription.updated":
             # Subscription updated
             subscription = event["data"]["object"]
@@ -195,21 +208,6 @@ async def stripe_webhook(
             # Subscription deleted
             subscription = event["data"]["object"]
             payment_service.handle_subscription_deleted(subscription.id)
-            
-        elif event_type == "checkout.session.completed":
-            # Checkout completed, handle based on product type
-            session = event["data"]["object"]
-            product_type = session.metadata.get("product_type")
-            
-            if product_type == "zone_upgrade":
-                # Handle zone upgrade purchase
-                payment_service.handle_zone_upgrade_checkout_completed(session.id)
-            elif product_type == "premium_world":
-                # Handle premium world purchase
-                payment_service.handle_premium_world_checkout_completed(session.id)
-            else:
-                # Regular subscription checkout
-                payment_service.handle_subscription_checkout_completed(session.id)
         
         return {"status": "success"}
         

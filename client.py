@@ -658,6 +658,112 @@ def move_character_to_zone(character_id: str, zone_id: str) -> Optional[Dict[str
         console.print(f"[bold red]Error moving character: {str(e)}[/bold red]")
         return None
 
+def get_agent_limits(zone_id: str) -> Optional[Dict[str, Any]]:
+    """Get agent limit information for a zone"""
+    if not state.access_token:
+        console.print("[yellow]Not logged in[/yellow]")
+        return None
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {state.access_token}"
+        }
+        
+        with console.status("[bold green]Getting agent limits...[/bold green]"):
+            response = requests.get(f"{API_URL}/zones/{zone_id}/agent-limits", headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            console.print(f"[bold red]Failed to get agent limits: {response.status_code}[/bold red]")
+            try:
+                error = response.json()
+                console.print(f"[red]{error['detail']}[/red]")
+            except:
+                console.print(f"[red]{response.text}[/red]")
+            return None
+    except Exception as e:
+        console.print(f"[bold red]Error getting agent limits: {str(e)}[/bold red]")
+        return None
+
+def purchase_agent_limit_upgrade(zone_id: str) -> Optional[Dict[str, str]]:
+    """Purchase an agent limit upgrade for a zone"""
+    if not state.access_token:
+        console.print("[yellow]Not logged in[/yellow]")
+        return None
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {state.access_token}"
+        }
+        
+        payload = {
+            "zone_id": zone_id,
+            "success_url": "http://localhost:8000/agent-limit-success",
+            "cancel_url": "http://localhost:8000/agent-limit-cancel"
+        }
+        
+        with console.status("[bold green]Initiating agent limit upgrade purchase...[/bold green]"):
+            response = requests.post(f"{API_URL}/zones/agent-limit-upgrade-checkout", json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"[bold green]Agent limit upgrade purchase initiated![/bold green]")
+            return data
+        else:
+            console.print(f"[bold red]Failed to initiate agent limit upgrade purchase: {response.status_code}[/bold red]")
+            try:
+                error = response.json()
+                console.print(f"[red]{error['detail']}[/red]")
+            except:
+                console.print(f"[red]{response.text}[/red]")
+            return None
+    except Exception as e:
+        console.print(f"[bold red]Error initiating agent limit upgrade purchase: {str(e)}[/bold red]")
+        return None
+
+def show_agent_limit_menu(zone_id: str):
+    """Show menu for agent limit management"""
+    zone = get_zone(zone_id)
+    
+    if not zone:
+        console.print("[yellow]Zone not found[/yellow]")
+        return
+    
+    # Get agent limits
+    limits = get_agent_limits(zone_id)
+    if not limits:
+        console.print("[yellow]Failed to get agent limits[/yellow]")
+        return
+    
+    console.print(Panel(
+        f"[bold]Agent Limits for {zone['name']}[/bold]\n\n"
+        f"Current Agent Count: {limits['agent_count']}\n"
+        f"Base Agent Limit: {limits['base_limit']}\n"
+        f"Agent Upgrades Purchased: {limits['upgrades_purchased']}\n"
+        f"Total Agent Limit: {limits['total_limit']}\n"
+        f"Remaining Capacity: {limits['remaining_capacity']}\n\n"
+        f"Each agent upgrade costs $9.99 and increases your\n"
+        f"agent limit by 10 additional agents.",
+        title="Agent Limits", border_style="cyan"
+    ))
+    
+    if limits['remaining_capacity'] < 5:
+        console.print("[yellow]WARNING: You are approaching your agent limit![/yellow]")
+    
+    # Check if user can purchase upgrades
+    if limits.get('can_purchase_upgrade', False):
+        if Confirm.ask("Would you like to purchase an agent limit upgrade?", default=False):
+            result = purchase_agent_limit_upgrade(zone_id)
+            if result and "checkout_url" in result:
+                console.print(f"[bold green]Agent limit upgrade purchase initiated![/bold green]")
+                console.print(f"[green]Please complete your purchase at: {result['checkout_url']}[/green]")
+                console.print("[green]After payment, your agent limit will increase automatically.[/green]")
+        else:
+            console.print("[yellow]Agent limit upgrade purchase cancelled[/yellow]")
+    else:
+        console.print("[yellow]Only the world owner can purchase agent limit upgrades[/yellow]")
+
 # ----------------------------
 # World & Zone Interactive Menus
 # ----------------------------
@@ -960,7 +1066,7 @@ def navigate_zones(world_id: str):
                     console.print(f"\n[bold]Selected: {selected_zone['name']}[/bold]")
                     action = Prompt.ask(
                         "What would you like to do?", 
-                        choices=["details", "navigate", "select", "cancel"], 
+                        choices=["details", "navigate", "select", "agents", "cancel"], 
                         default="details"
                     )
                     
@@ -979,6 +1085,11 @@ def navigate_zones(world_id: str):
                             ]
                             console.print(Panel("\n".join(details), title=f"Zone: {zone_details['name']}", border_style="green"))
                             Prompt.ask("Press Enter to continue")
+                    
+                    elif action == "agents":
+                        # Show agent limit management menu
+                        show_agent_limit_menu(selected_zone["id"])
+                        Prompt.ask("Press Enter to continue")
                         
                     elif action == "navigate":
                         # Navigate to this zone's sub-zones

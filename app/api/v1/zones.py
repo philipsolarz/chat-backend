@@ -539,3 +539,107 @@ async def move_agent_to_zone(
     # Get updated agent
     updated_agent = agent_service.get_agent(agent_id)
     return updated_agent
+
+
+@router.get(
+    "/{zone_id}/agent-limits",
+    response_model=Dict[str, Any]
+)
+async def get_zone_agent_limits(
+    zone_id: str,
+    current_user: User = Depends(get_current_user),
+    zone_service: ZoneService = Depends(get_service(ZoneService)),
+    world_service: WorldService = Depends(get_service(WorldService))
+):
+    """
+    Get agent limit information for a zone
+    
+    Returns current agent count, limit, and upgrade information
+    """
+    zone = zone_service.get_zone(zone_id)
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Zone not found"
+        )
+    
+    # Check if user has access to the world
+    if not world_service.check_user_access(current_user.id, zone.world_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this world"
+        )
+    
+    # Get zone agent limits
+    limits = zone_service.get_zone_agent_limits(zone_id)
+    
+    # Check if user is the world owner (for purchase options)
+    world = world_service.get_world(zone.world_id)
+    is_owner = world and world.owner_id == current_user.id
+    
+    return {
+        **limits,
+        "is_owner": is_owner,
+        "can_purchase_upgrade": is_owner
+    }
+
+@router.post("/agent-limit-upgrade-checkout", response_model=Dict[str, str])
+async def create_agent_limit_upgrade_checkout(
+    zone_id: str = Body(..., embed=True),
+    success_url: str = Body(..., embed=True),
+    cancel_url: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+    payment_service: PaymentService = Depends(get_service(PaymentService)),
+    zone_service: ZoneService = Depends(get_service(ZoneService)),
+    world_service: WorldService = Depends(get_service(WorldService))
+):
+    """
+    Create a checkout session for purchasing an agent limit upgrade
+    
+    Returns a URL to redirect the user to for payment
+    """
+    try:
+        # Get the zone
+        zone = zone_service.get_zone(zone_id)
+        if not zone:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Zone not found"
+            )
+        
+        # Get the world to check ownership
+        world = world_service.get_world(zone.world_id)
+        if not world:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="World not found"
+            )
+        
+        # Check if user is the world owner
+        if world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can purchase agent limit upgrades"
+            )
+        
+        # Create checkout for agent limit upgrade
+        checkout_url = payment_service.create_agent_limit_upgrade_checkout(
+            user_id=current_user.id,
+            zone_id=zone_id,
+            success_url=success_url,
+            cancel_url=cancel_url
+        )
+        
+        return {"checkout_url": checkout_url}
+    
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        # logger.error(f"Error creating agent limit upgrade checkout: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create checkout session"
+        )

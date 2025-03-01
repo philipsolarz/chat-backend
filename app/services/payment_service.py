@@ -636,3 +636,156 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error handling zone upgrade checkout: {str(e)}")
             return None
+        
+    def create_agent_limit_upgrade_checkout(self, 
+                                        user_id: str, 
+                                        zone_id: str,
+                                        success_url: str, 
+                                        cancel_url: str,
+                                        price: float = 9.99) -> str:
+        """
+        Create a Stripe checkout session for agent limit upgrade
+        
+        Args:
+            user_id: User ID
+            zone_id: ID of the zone to upgrade
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD (defaults to $9.99)
+                
+        Returns:
+            Checkout session URL
+        """
+        # Get user
+        user = self.user_service.get_user(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        # Get zone to verify it exists
+        from app.services.zone_service import ZoneService
+        zone_service = ZoneService(self.db)
+        
+        zone = zone_service.get_zone(zone_id)
+        if not zone:
+            raise ValueError("Zone not found")
+        
+        # Get world to verify ownership
+        from app.services.world_service import WorldService
+        world_service = WorldService(self.db)
+        
+        world = world_service.get_world(zone.world_id)
+        if not world:
+            raise ValueError("World not found")
+            
+        if world.owner_id != user_id:
+            raise ValueError("Only the world owner can purchase agent limit upgrades")
+        
+        try:
+            # Check if user already has a Stripe customer ID
+            stripe_customer_id = None
+            existing_subscription = self.get_user_subscription(user_id)
+            
+            if existing_subscription and existing_subscription.stripe_customer_id:
+                stripe_customer_id = existing_subscription.stripe_customer_id
+            
+            # Create a new Stripe customer if needed
+            if not stripe_customer_id:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.display_name,
+                    metadata={"user_id": user.id}
+                )
+                stripe_customer_id = customer.id
+            
+            # Create price object for one-time purchase
+            price_obj = stripe.Price.create(
+                unit_amount=int(price * 100),  # Convert to cents
+                currency="usd",
+                product_data={
+                    "name": f"Agent Limit Upgrade: {zone.name}",
+                    "description": "Increase agent limit by 10 for your zone"
+                }
+            )
+            
+            # Create checkout session
+            checkout_session = stripe.checkout.Session.create(
+                customer=stripe_customer_id,
+                payment_method_types=["card"],
+                line_items=[{
+                    "price": price_obj.id,
+                    "quantity": 1
+                }],
+                mode="payment",  # one-time payment
+                success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=cancel_url,
+                metadata={
+                    "user_id": user.id,
+                    "product_type": "agent_limit_upgrade",
+                    "zone_id": zone_id
+                }
+            )
+            
+            return checkout_session.url
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            raise ValueError(f"Payment processing error: {str(e)}")
+
+    def handle_agent_limit_upgrade_checkout_completed(self, session_id: str) -> Optional[bool]:
+        """
+        Handle completed checkout session for agent limit upgrade
+        
+        Args:
+            session_id: Stripe checkout session ID
+            
+        Returns:
+            True if successful, None if failed
+        """
+        try:
+            # Get checkout session
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            # Check if this is an agent limit upgrade purchase
+            if session.metadata.get("product_type") != "agent_limit_upgrade":
+                logger.error(f"Not an agent limit upgrade checkout: {session_id}")
+                return None
+            
+            # Get zone ID from metadata
+            zone_id = session.metadata.get("zone_id")
+            user_id = session.metadata.get("user_id")
+            
+            if not zone_id or not user_id:
+                logger.error(f"Zone ID or User ID not found in session metadata: {session_id}")
+                return None
+            
+            # Verify zone and ownership
+            from app.services.zone_service import ZoneService
+            zone_service = ZoneService(self.db)
+            
+            zone = zone_service.get_zone(zone_id)
+            if not zone:
+                logger.error(f"Zone not found: {zone_id}")
+                return None
+                
+            # Verify world ownership
+            from app.services.world_service import WorldService
+            world_service = WorldService(self.db)
+            
+            world = world_service.get_world(zone.world_id)
+            if not world or world.owner_id != user_id:
+                logger.error(f"User {user_id} is not the owner of this zone's world")
+                return None
+            
+            # Apply the upgrade
+            zone.agent_limit_upgrades += 1
+            self.db.commit()
+            
+            logger.info(f"Agent limit upgraded for zone {zone_id}. New limit: {zone.total_agent_limit}")
+            return True
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error handling agent limit upgrade checkout: {str(e)}")
+            return None

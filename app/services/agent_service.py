@@ -13,13 +13,32 @@ class AgentService:
     def __init__(self, db: Session):
         self.db = db
     
-    def create_agent(self, name: str, description: str = None, system_prompt: str = None) -> Agent:
-        """Create a new AI agent"""
+    def create_agent(self, name: str, description: str = None, system_prompt: str = None, zone_id: Optional[str] = None) -> Optional[Agent]:
+        """
+        Create a new AI agent, optionally assigning it to a zone
+        
+        Args:
+            name: Name of the agent
+            description: Optional description
+            system_prompt: Optional system prompt for AI behavior
+            zone_id: Optional zone ID to place the agent in
+            
+        Returns:
+            The created agent or None if the zone has reached its agent limit
+        """
+        # If zone_id is provided, check the zone's agent limit
+        if zone_id:
+            from app.services.zone_service import ZoneService
+            zone_service = ZoneService(self.db)
+            if not zone_service.can_add_agent_to_zone(zone_id):
+                return None  # Zone has reached its agent limit
+        
         agent = Agent(
             name=name,
             description=description,
             system_prompt=system_prompt,
-            is_active=True
+            is_active=True,
+            zone_id=zone_id
         )
         
         self.db.add(agent)
@@ -177,3 +196,33 @@ class AgentService:
     def deactivate_agent(self, agent_id: str) -> Optional[Agent]:
         """Deactivate an agent"""
         return self.update_agent(agent_id, {"is_active": False})
+    
+    def move_agent_to_zone(self, agent_id: str, zone_id: str) -> bool:
+        """
+        Move an agent to a different zone
+        
+        Args:
+            agent_id: ID of the agent to move
+            zone_id: ID of the destination zone
+            
+        Returns:
+            True if successful, False if the zone has reached its agent limit
+        """
+        agent = self.get_agent(agent_id)
+        if not agent:
+            return False
+        
+        # If moving to the same zone, just return success
+        if agent.zone_id == zone_id:
+            return True
+        
+        # Check if zone has reached its agent limit
+        from app.services.zone_service import ZoneService
+        zone_service = ZoneService(self.db)
+        if not zone_service.can_add_agent_to_zone(zone_id):
+            return False  # Zone has reached its agent limit
+        
+        agent.zone_id = zone_id
+        self.db.commit()
+        
+        return True
