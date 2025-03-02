@@ -60,9 +60,7 @@ async def create_zone(
         world_id=zone.world_id,
         name=zone.name,
         description=zone.description,
-        zone_type=zone.zone_type,
-        coordinates=zone.coordinates,
-        properties=zone.properties,
+        settings=zone.settings,
         parent_zone_id=zone.parent_zone_id
     )
     
@@ -80,7 +78,6 @@ async def list_zones(
     world_id: str = Query(..., description="ID of the world to list zones for"),
     parent_zone_id: Optional[str] = Query(None, description="ID of the parent zone to list sub-zones for"),
     name: Optional[str] = None,
-    zone_type: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("name"),
@@ -116,9 +113,6 @@ async def list_zones(
     
     if name:
         filters['name'] = name
-    
-    if zone_type:
-        filters['zone_type'] = zone_type
     
     # Get zones
     zones, total_count, total_pages = zone_service.get_zones(
@@ -183,11 +177,11 @@ async def get_zone_hierarchy(
             id=zone.id,
             name=zone.name,
             description=zone.description,
-            zone_type=zone.zone_type,
-            coordinates=zone.coordinates,
-            properties=zone.properties,
+            settings=zone.settings,
             world_id=zone.world_id,
             parent_zone_id=zone.parent_zone_id,
+            entity_limit=zone.entity_limit,
+            entity_limit_upgrades=zone.entity_limit_upgrades,
             created_at=zone.created_at,
             sub_zones=[]
         )
@@ -215,7 +209,7 @@ async def get_zone(
     """
     Get details of a specific zone
     
-    Includes counts of sub-zones, characters, and agents
+    Includes counts of sub-zones and entities
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -234,18 +228,14 @@ async def get_zone(
     # Count sub-zones
     sub_zone_count = zone_service.db.query(Zone).filter(Zone.parent_zone_id == zone_id).count()
     
-    # Count characters
-    character_count = len(zone_service.get_characters_in_zone(zone_id))
-    
-    # Count agents
-    agent_count = len(zone_service.get_agents_in_zone(zone_id))
+    # Count entities
+    entity_count = zone_service.count_entities_in_zone(zone_id)
     
     # Create response
     response = {
         **zone.__dict__,
         "sub_zone_count": sub_zone_count,
-        "character_count": character_count,
-        "agent_count": agent_count
+        "entity_count": entity_count
     }
     
     return response
@@ -302,7 +292,7 @@ async def delete_zone(
     Delete a zone
     
     If the zone has sub-zones, they will be reparented to the zone's parent.
-    If the zone has characters/agents and no parent, it cannot be deleted.
+    If the zone has entities and no parent, it cannot be deleted.
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -323,238 +313,26 @@ async def delete_zone(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to delete zone. The zone may contain characters or agents and have no parent zone."
+            detail="Failed to delete zone. The zone may contain entities and have no parent zone."
         )
     
     return None
 
 
-@router.get("/{zone_id}/characters", response_model=List[schemas.CharacterResponse])
-async def get_zone_characters(
-    zone_id: str,
-    current_user: User = Depends(get_current_user),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    world_service: WorldService = Depends(get_service(WorldService))
-):
-    """
-    Get all characters in a zone
-    """
-    zone = zone_service.get_zone(zone_id)
-    if not zone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Zone not found"
-        )
-    
-    # Check if user has access to the world
-    if not world_service.check_user_access(current_user.id, zone.world_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this world"
-        )
-    
-    characters = zone_service.get_characters_in_zone(zone_id)
-    return characters
-
-
-@router.get("/{zone_id}/agents", response_model=List[schemas.AgentResponse])
-async def get_zone_agents(
-    zone_id: str,
-    current_user: User = Depends(get_current_user),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    world_service: WorldService = Depends(get_service(WorldService))
-):
-    """
-    Get all agents (NPCs) in a zone
-    """
-    zone = zone_service.get_zone(zone_id)
-    if not zone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Zone not found"
-        )
-    
-    # Check if user has access to the world
-    if not world_service.check_user_access(current_user.id, zone.world_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this world"
-        )
-    
-    agents = zone_service.get_agents_in_zone(zone_id)
-    return agents
-
-
-@router.post("/zone-upgrade-checkout", response_model=Dict[str, str])
-async def create_zone_upgrade_checkout(
-    world_id: str = Body(..., embed=True),
-    success_url: str = Body(..., embed=True),
-    cancel_url: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_user),
-    payment_service: PaymentService = Depends(get_service(PaymentService)),
-    world_service: WorldService = Depends(get_service(WorldService))
-):
-    """
-    Create a checkout session for purchasing a zone limit upgrade
-    
-    Returns a URL to redirect the user to for payment
-    """
-    try:
-        # Check if user is the world owner
-        world = world_service.get_world(world_id)
-        if not world:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="World not found"
-            )
-        
-        if world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can purchase zone upgrades"
-            )
-        
-        # Create checkout for zone upgrade
-        checkout_url = payment_service.create_zone_upgrade_checkout(
-            user_id=current_user.id,
-            world_id=world_id,
-            success_url=success_url,
-            cancel_url=cancel_url
-        )
-        
-        return {"checkout_url": checkout_url}
-    
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        # logger.error(f"Error creating zone upgrade checkout: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create checkout session"
-        )
-
-
-@router.post("/characters/{character_id}/move", response_model=schemas.CharacterResponse)
-async def move_character_to_zone(
-    character_id: str,
-    zone_id: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_user),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    character_service = Depends(get_service("CharacterService")),
-    world_service: WorldService = Depends(get_service(WorldService))
-):
-    """
-    Move a character to a different zone
-    """
-    # Check if character exists and belongs to user
-    character = character_service.get_character(character_id)
-    if not character:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Character not found"
-        )
-    
-    if character.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only move your own characters"
-        )
-    
-    # Check if zone exists and is in the same world
-    zone = zone_service.get_zone(zone_id)
-    if not zone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Zone not found"
-        )
-    
-    if zone.world_id != character.world_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot move character to a zone in a different world"
-        )
-    
-    # Move the character
-    success = zone_service.move_character_to_zone(character_id, zone_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to move character"
-        )
-    
-    # Get updated character
-    updated_character = character_service.get_character(character_id)
-    return updated_character
-
-
-@router.post("/agents/{agent_id}/move", response_model=schemas.AgentResponse)
-async def move_agent_to_zone(
-    agent_id: str,
-    zone_id: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_user),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    agent_service = Depends(get_service("AgentService")),
-    world_service: WorldService = Depends(get_service(WorldService))
-):
-    """
-    Move an agent (NPC) to a different zone
-    
-    Only world owners can move agents
-    """
-    # Check if agent exists
-    agent = agent_service.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Agent not found"
-        )
-    
-    # Check if zone exists
-    zone = zone_service.get_zone(zone_id)
-    if not zone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Zone not found"
-        )
-    
-    # Check if user is the world owner
-    world = world_service.get_world(zone.world_id)
-    if not world or world.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the world owner can move agents"
-        )
-    
-    # Move the agent
-    success = zone_service.move_agent_to_zone(agent_id, zone_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to move agent"
-        )
-    
-    # Get updated agent
-    updated_agent = agent_service.get_agent(agent_id)
-    return updated_agent
-
-
 @router.get(
-    "/{zone_id}/agent-limits",
+    "/{zone_id}/entity-limits",
     response_model=Dict[str, Any]
 )
-async def get_zone_agent_limits(
+async def get_zone_entity_limits(
     zone_id: str,
     current_user: User = Depends(get_current_user),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get agent limit information for a zone
+    Get entity limit information for a zone
     
-    Returns current agent count, limit, and upgrade information
+    Returns current entity count, limit, and upgrade information
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -570,8 +348,8 @@ async def get_zone_agent_limits(
             detail="You don't have access to this world"
         )
     
-    # Get zone agent limits
-    limits = zone_service.get_zone_agent_limits(zone_id)
+    # Get zone entity limits
+    limits = zone_service.get_zone_entity_limits(zone_id)
     
     # Check if user is the world owner (for purchase options)
     world = world_service.get_world(zone.world_id)
@@ -583,8 +361,9 @@ async def get_zone_agent_limits(
         "can_purchase_upgrade": is_owner
     }
 
-@router.post("/agent-limit-upgrade-checkout", response_model=Dict[str, str])
-async def create_agent_limit_upgrade_checkout(
+
+@router.post("/entity-limit-upgrade-checkout", response_model=Dict[str, str])
+async def create_entity_limit_upgrade_checkout(
     zone_id: str = Body(..., embed=True),
     success_url: str = Body(..., embed=True),
     cancel_url: str = Body(..., embed=True),
@@ -594,7 +373,7 @@ async def create_agent_limit_upgrade_checkout(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a checkout session for purchasing an agent limit upgrade
+    Create a checkout session for purchasing an entity limit upgrade
     
     Returns a URL to redirect the user to for payment
     """
@@ -607,7 +386,7 @@ async def create_agent_limit_upgrade_checkout(
                 detail="Zone not found"
             )
         
-        # Get the world to check ownership
+        # Get the world to verify ownership
         world = world_service.get_world(zone.world_id)
         if not world:
             raise HTTPException(
@@ -619,11 +398,11 @@ async def create_agent_limit_upgrade_checkout(
         if world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can purchase agent limit upgrades"
+                detail="Only the world owner can purchase entity limit upgrades"
             )
         
-        # Create checkout for agent limit upgrade
-        checkout_url = payment_service.create_agent_limit_upgrade_checkout(
+        # Create checkout for entity limit upgrade
+        checkout_url = payment_service.create_entity_limit_upgrade_checkout(
             user_id=current_user.id,
             zone_id=zone_id,
             success_url=success_url,
@@ -638,7 +417,6 @@ async def create_agent_limit_upgrade_checkout(
             detail=str(e)
         )
     except Exception as e:
-        # logger.error(f"Error creating agent limit upgrade checkout: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session"

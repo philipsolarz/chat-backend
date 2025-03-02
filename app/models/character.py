@@ -2,22 +2,15 @@
 from sqlalchemy import Column, String, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
-from app.database import Base
-from app.models.mixins import TimestampMixin, generate_uuid
+from app.models.entity import Entity, EntityType
 
 
-class Character(Base, TimestampMixin):
+class Character(Entity):
     """
     Model representing characters in the system
     Characters can be controlled by users (private) or available to agents (public)
     """
-    __tablename__ = "characters"
-    
-    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)  # Includes personality description
-    
-    # New fields for character templates
+    # Character-specific fields
     template = Column(Text, nullable=True)  # Character template for AI voice
     is_template = Column(Boolean, default=False)  # Whether this is a template character
     
@@ -27,14 +20,16 @@ class Character(Base, TimestampMixin):
     # User relationship (can be null for system-created public characters)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     
+    # World relationship
     world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    world = relationship("World", back_populates="characters")
-
-    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
-    zone = relationship("Zone", back_populates="characters")
-
+    
+    __mapper_args__ = {
+        'polymorphic_identity': EntityType.CHARACTER
+    }
+    
     # Relationships
     user = relationship("User", back_populates="characters")
+    world = relationship("World", back_populates="characters")
     
     # Participation in conversations
     conversation_participations = relationship(
@@ -42,3 +37,6 @@ class Character(Base, TimestampMixin):
         back_populates="character",
         cascade="all, delete-orphan"
     )
+    
+    def __repr__(self):
+        return f"<Character {self.id} - {self.name}>"

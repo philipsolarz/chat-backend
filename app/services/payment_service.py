@@ -637,14 +637,14 @@ class PaymentService:
             logger.error(f"Error handling zone upgrade checkout: {str(e)}")
             return None
         
-    def create_agent_limit_upgrade_checkout(self, 
+    def create_entity_limit_upgrade_checkout(self, 
                                         user_id: str, 
                                         zone_id: str,
                                         success_url: str, 
                                         cancel_url: str,
                                         price: float = 9.99) -> str:
         """
-        Create a Stripe checkout session for agent limit upgrade
+        Create a Stripe checkout session for entity limit upgrade
         
         Args:
             user_id: User ID
@@ -678,7 +678,7 @@ class PaymentService:
             raise ValueError("World not found")
             
         if world.owner_id != user_id:
-            raise ValueError("Only the world owner can purchase agent limit upgrades")
+            raise ValueError("Only the world owner can purchase entity limit upgrades")
         
         try:
             # Check if user already has a Stripe customer ID
@@ -702,8 +702,8 @@ class PaymentService:
                 unit_amount=int(price * 100),  # Convert to cents
                 currency="usd",
                 product_data={
-                    "name": f"Agent Limit Upgrade: {zone.name}",
-                    "description": "Increase agent limit by 10 for your zone"
+                    "name": f"Entity Limit Upgrade: {zone.name}",
+                    "description": "Increase entity limit by 10 for your zone"
                 }
             )
             
@@ -720,7 +720,7 @@ class PaymentService:
                 cancel_url=cancel_url,
                 metadata={
                     "user_id": user.id,
-                    "product_type": "agent_limit_upgrade",
+                    "product_type": "entity_limit_upgrade",
                     "zone_id": zone_id
                 }
             )
@@ -731,9 +731,10 @@ class PaymentService:
             logger.error(f"Stripe error: {str(e)}")
             raise ValueError(f"Payment processing error: {str(e)}")
 
-    def handle_agent_limit_upgrade_checkout_completed(self, session_id: str) -> Optional[bool]:
+
+    def handle_entity_limit_upgrade_checkout_completed(self, session_id: str) -> Optional[bool]:
         """
-        Handle completed checkout session for agent limit upgrade
+        Handle completed checkout session for entity limit upgrade
         
         Args:
             session_id: Stripe checkout session ID
@@ -745,9 +746,9 @@ class PaymentService:
             # Get checkout session
             session = stripe.checkout.Session.retrieve(session_id)
             
-            # Check if this is an agent limit upgrade purchase
-            if session.metadata.get("product_type") != "agent_limit_upgrade":
-                logger.error(f"Not an agent limit upgrade checkout: {session_id}")
+            # Check if this is an entity limit upgrade purchase
+            if session.metadata.get("product_type") != "entity_limit_upgrade":
+                logger.error(f"Not an entity limit upgrade checkout: {session_id}")
                 return None
             
             # Get zone ID from metadata
@@ -777,15 +778,15 @@ class PaymentService:
                 return None
             
             # Apply the upgrade
-            zone.agent_limit_upgrades += 1
+            zone.entity_limit_upgrades += 1
             self.db.commit()
             
-            logger.info(f"Agent limit upgraded for zone {zone_id}. New limit: {zone.total_agent_limit}")
+            logger.info(f"Entity limit upgraded for zone {zone_id}. New limit: {zone.total_entity_limit}")
             return True
             
         except stripe.error.StripeError as e:
             logger.error(f"Stripe error: {str(e)}")
             return None
         except Exception as e:
-            logger.error(f"Error handling agent limit upgrade checkout: {str(e)}")
+            logger.error(f"Error handling entity limit upgrade checkout: {str(e)}")
             return None
