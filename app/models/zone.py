@@ -34,6 +34,8 @@ class Zone(Base, TimestampMixin):
     objects = relationship("Object", back_populates="zone")
     agents = relationship("Agent", back_populates="zone")
     players = relationship("Player", back_populates="zone")
+
+    events = relationship("GameEvent", back_populates="zone", cascade="all, delete-orphan")
     
     # Self-referential relationship for sub-zones
     parent_zone = relationship("Zone", back_populates="sub_zones", remote_side=[id])

@@ -172,6 +172,34 @@ async def global_exception_handler(request: Request, exc: Exception):
     }, status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
+
+@app.websocket("/ws/game/{character_id}")
+async def game_websocket_endpoint(
+    websocket: WebSocket,
+    character_id: str,
+    zone_id: str,
+    access_token: str,
+    db: Session = Depends(get_db)
+):
+    """
+    WebSocket endpoint for real-time game connection
+    
+    Args:
+        websocket: WebSocket connection
+        character_id: ID of the character connecting to the game
+        zone_id: ID of the zone the character is in
+        access_token: JWT authentication token
+    """
+    from app.websockets.connection_manager import handle_game_connection
+    
+    await handle_game_connection(
+        websocket=websocket,
+        character_id=character_id,
+        zone_id=zone_id,
+        token=access_token,
+        db=db
+    )
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

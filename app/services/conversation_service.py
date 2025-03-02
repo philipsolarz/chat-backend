@@ -7,7 +7,7 @@ import math
 from app.models.conversation import Conversation, ConversationParticipant
 from app.models.character import Character
 from app.models.agent import Agent
-from app.models.player import User
+from app.models.player import Player as User
 from app.models.message import Message
 
 

@@ -1,6 +1,6 @@
-# app/api/v1/router.py
+# app/api/v1/router.py - Update to include events router
 from fastapi import APIRouter
-from app.api.v1 import players, characters, agents, conversations, messages, auth, payments, usage, worlds, zones, entities, objects
+from app.api.v1 import players, characters, agents, conversations, messages, auth, payments, usage, worlds, zones, entities, objects, events
 
 # Create the main router
 api_router = APIRouter()
@@ -18,3 +18,4 @@ api_router.include_router(conversations.router, prefix="/conversations", tags=["
 api_router.include_router(messages.router, prefix="/messages", tags=["messages"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
+api_router.include_router(events.router, prefix="/events", tags=["events"])

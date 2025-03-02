@@ -10,7 +10,7 @@ from app.database import get_db
 from app.api import schemas
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
-from app.models.player import User
+from app.models.player import Player as User
 from app.services.payment_service import PaymentService
 from app.config import get_settings
 

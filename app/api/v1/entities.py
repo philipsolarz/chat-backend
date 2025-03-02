@@ -10,7 +10,7 @@ from app.api.dependencies import check_entity_ownership, get_service
 from app.services.entity_service import EntityService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
-from app.models.player import User
+from app.models.player import Player as User
 from app.models.entity import Entity, EntityType
 
 router = APIRouter()

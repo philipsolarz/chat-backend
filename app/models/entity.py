@@ -47,6 +47,8 @@ class Entity(Base, TimestampMixin):
     object = relationship("Object", back_populates="object")
     agent = relationship("Agent", back_populates="agent")
     player = relationship("Player", back_populates="player")
+
+    targeted_events = relationship("GameEvent", foreign_keys="GameEvent.target_entity_id", back_populates="target_entity")
     
     def __repr__(self):
         return f"<Entity {self.id} - {self.name} ({self.type})>"

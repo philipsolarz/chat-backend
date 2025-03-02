@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 from app.config import get_settings
-from app.models.player import User
+from app.models.player import Player as User
 from app.models.usage import UserDailyUsage, UserUsageSummary
 from app.models.character import Character
 from app.models.conversation import Conversation, ConversationParticipant

@@ -9,207 +9,151 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.auth_service import AuthService
-from app.services.conversation_service import ConversationService
-from app.services.message_service import MessageService
-from app.services.usage_service import UsageService
-from app.ai.agent_manager import AgentManager
-from app.websockets.event_dispatcher import event_registry
+from app.services.event_service import EventService
+from app.models.game_event import EventType, EventScope
 
 logger = logging.getLogger(__name__)
 
 class ConnectionManager:
-    """Manager for WebSocket connections"""
+    """Manager for WebSocket game connections"""
     
     def __init__(self):
-        # Map of conversation_id -> dict of WebSocket -> participant info
-        self.active_connections: Dict[str, Dict[WebSocket, Dict[str, Any]]] = {}
-        # Map of user_id -> set of WebSocket connections
-        self.user_connections: Dict[str, Set[WebSocket]] = {}
+        # Map of character_id -> WebSocket
+        self.character_connections: Dict[str, WebSocket] = {}
+        # Map of zone_id -> set of character_ids currently in the zone
+        self.zone_characters: Dict[str, Set[str]] = {}
+        # Map of WebSocket -> character_id
+        self.connection_characters: Dict[WebSocket, str] = {}
+        # Map of character_id -> zone_id
+        self.character_zones: Dict[str, str] = {}
     
     async def connect(
         self, 
         websocket: WebSocket, 
-        conversation_id: str,
-        user_id: str,
-        participant_id: Optional[str] = None
+        character_id: str,
+        zone_id: str
     ) -> bool:
-        """Register a new WebSocket connection"""
+        """Register a new WebSocket game connection"""
         try:
-            if conversation_id not in self.active_connections:
-                self.active_connections[conversation_id] = {}
-            self.active_connections[conversation_id][websocket] = {
-                "user_id": user_id,
-                "participant_id": participant_id,
-                "joined_at": datetime.now().isoformat()
-            }
-            if user_id not in self.user_connections:
-                self.user_connections[user_id] = set()
-            self.user_connections[user_id].add(websocket)
+            # Store the connection
+            self.character_connections[character_id] = websocket
+            self.connection_characters[websocket] = character_id
+            self.character_zones[character_id] = zone_id
             
-            # Notify others about the new connection
-            try:
-                await self.broadcast_to_conversation(
-                    conversation_id,
-                    {
-                        "type": "connection",
-                        "event": "connected",
-                        "user_id": user_id,
-                        "participant_id": participant_id,
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    exclude=websocket
-                )
-            except Exception as e:
-                logger.warning(f"Error broadcasting connection event: {str(e)}")
-                
+            # Track character in zone
+            if zone_id not in self.zone_characters:
+                self.zone_characters[zone_id] = set()
+            self.zone_characters[zone_id].add(character_id)
+            
+            logger.info(f"Character {character_id} connected in zone {zone_id}")
             return True
         except Exception as e:
-            logger.error(f"Error connecting WebSocket: {str(e)}")
+            logger.error(f"Error connecting WebSocket for character {character_id}: {str(e)}")
             return False
     
     def disconnect(self, websocket: WebSocket):
         """Unregister a WebSocket connection"""
-        user_id = None
-        participant_id = None
-        conversation_ids = []
-        
-        # Find all conversations this websocket is connected to
-        for conversation_id, connections in list(self.active_connections.items()):
-            if websocket in connections:
-                conn_info = connections.get(websocket, {})
-                user_id = conn_info.get("user_id")
-                participant_id = conn_info.get("participant_id")
-                conversation_ids.append(conversation_id)
+        character_id = self.connection_characters.get(websocket)
+        if character_id:
+            # Get zone before removing connections
+            zone_id = self.character_zones.get(character_id)
+            
+            # Remove from character connections
+            if character_id in self.character_connections:
+                del self.character_connections[character_id]
+            
+            # Remove from connection characters
+            del self.connection_characters[websocket]
+            
+            # Remove from character zones
+            if character_id in self.character_zones:
+                del self.character_zones[character_id]
+            
+            # Remove from zone characters
+            if zone_id and zone_id in self.zone_characters:
+                if character_id in self.zone_characters[zone_id]:
+                    self.zone_characters[zone_id].remove(character_id)
                 
-                # Remove from conversation connections
-                try:
-                    del connections[websocket]
-                except KeyError:
-                    pass
-                    
-                # Remove empty conversation entries
-                if not connections:
-                    try:
-                        del self.active_connections[conversation_id]
-                    except KeyError:
-                        pass
-        
-        # Remove from user connections
-        if user_id and user_id in self.user_connections:
-            try:
-                self.user_connections[user_id].discard(websocket)
-                if not self.user_connections[user_id]:
-                    del self.user_connections[user_id]
-            except Exception:
-                pass
-        
-        # Notify others about the disconnection
-        for conv_id in conversation_ids:
-            if user_id and participant_id:
-                asyncio.create_task(self._notify_disconnect(conv_id, user_id, participant_id))
+                # Notify others in zone about departure
+                if len(self.zone_characters[zone_id]) > 0:
+                    asyncio.create_task(self._notify_zone_departure(zone_id, character_id))
+            
+            logger.info(f"Character {character_id} disconnected from zone {zone_id}")
     
-    async def _notify_disconnect(self, conversation_id, user_id, participant_id):
-        """Send disconnect notification to other clients"""
-        try:
-            await self.broadcast_to_conversation(
-                conversation_id,
-                {
-                    "type": "connection",
-                    "event": "disconnected",
-                    "user_id": user_id,
-                    "participant_id": participant_id,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-        except Exception as e:
-            logger.warning(f"Error broadcasting disconnect event: {str(e)}")
-    
-    async def broadcast_to_conversation(
+    async def broadcast_to_zone(
         self, 
-        conversation_id: str, 
-        message: Dict[str, Any],
-        exclude: Optional[WebSocket] = None
+        zone_id: str, 
+        event: Dict[str, Any],
+        exclude_character_id: Optional[str] = None
     ):
-        """Broadcast a message to all connections in a conversation"""
-        if conversation_id not in self.active_connections:
+        """Broadcast an event to all characters in a zone"""
+        if zone_id not in self.zone_characters:
             return
             
-        connections = list(self.active_connections[conversation_id].keys())
-        for connection in connections:
-            if connection != exclude:
-                try:
-                    await connection.send_json(message)
-                except Exception as e:
-                    logger.error(f"Error sending message to client: {str(e)}")
-                    self.disconnect(connection)
-    
-    async def broadcast_to_user(self, user_id: str, message: Dict[str, Any]):
-        """Broadcast a message to all connections for a user"""
-        if user_id not in self.user_connections:
-            return
-            
-        connections = list(self.user_connections[user_id])
-        for connection in connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error sending message to user: {str(e)}")
-                self.disconnect(connection)
-    
-    def get_active_users_in_conversation(self, conversation_id: str) -> Dict[str, Any]:
-        """Get all active users in a conversation"""
-        if conversation_id not in self.active_connections:
-            return {}
-            
-        user_info = {}
-        for conn_data in self.active_connections[conversation_id].values():
-            user_id = conn_data.get("user_id")
-            if not user_id:
+        for character_id in self.zone_characters[zone_id]:
+            if character_id == exclude_character_id:
                 continue
                 
-            if user_id not in user_info:
-                user_info[user_id] = {
-                    "user_id": user_id,
-                    "connection_count": 1,
-                    "participants": []
-                }
-            else:
-                user_info[user_id]["connection_count"] += 1
-                
-            participant_id = conn_data.get("participant_id")
-            if participant_id and participant_id not in user_info[user_id]["participants"]:
-                user_info[user_id]["participants"].append(participant_id)
-                
-        return user_info
+            await self.send_to_character(character_id, event)
     
-    def get_active_participants_in_conversation(self, conversation_id: str) -> Set[str]:
-        """Get all active participants in a conversation"""
-        if conversation_id not in self.active_connections:
-            return set()
-            
-        participants = set()
-        for conn_data in self.active_connections[conversation_id].values():
-            participant_id = conn_data.get("participant_id")
-            if participant_id:
-                participants.add(participant_id)
-                
-        return participants
+    async def send_to_character(
+        self, 
+        character_id: str, 
+        event: Dict[str, Any]
+    ):
+        """Send an event to a specific character"""
+        websocket = self.character_connections.get(character_id)
+        if websocket:
+            try:
+                await websocket.send_json(event)
+            except Exception as e:
+                logger.error(f"Error sending event to character {character_id}: {str(e)}")
+                self.disconnect(websocket)
     
-    def get_user_connection_count(self, user_id: str) -> int:
-        """Get the number of active connections for a user"""
-        return len(self.user_connections.get(user_id, set()))
+    async def _notify_zone_departure(self, zone_id: str, character_id: str):
+        """Notify others in zone about a character leaving"""
+        await self.broadcast_to_zone(
+            zone_id,
+            {
+                "type": "game_event",
+                "event_type": "character_left_zone",
+                "character_id": character_id,
+                "zone_id": zone_id,
+                "timestamp": datetime.now().isoformat()
+            },
+            exclude_character_id=character_id
+        )
+    
+    def get_characters_in_zone(self, zone_id: str) -> List[str]:
+        """Get all character IDs currently in a zone"""
+        return list(self.zone_characters.get(zone_id, set()))
+    
+    def move_character_to_zone(self, character_id: str, from_zone_id: str, to_zone_id: str):
+        """Move a character from one zone to another"""
+        # Remove from old zone
+        if from_zone_id in self.zone_characters and character_id in self.zone_characters[from_zone_id]:
+            self.zone_characters[from_zone_id].remove(character_id)
+        
+        # Add to new zone
+        if to_zone_id not in self.zone_characters:
+            self.zone_characters[to_zone_id] = set()
+        self.zone_characters[to_zone_id].add(character_id)
+        
+        # Update character's current zone
+        self.character_zones[character_id] = to_zone_id
+        
+        logger.info(f"Character {character_id} moved from zone {from_zone_id} to {to_zone_id}")
+
 
 # Create singleton instance
 connection_manager = ConnectionManager()
 
-# Authentication helpers
+
 async def authenticate_connection(
     websocket: WebSocket,
     token: str,
-    conversation_id: str,
-    participant_id: Optional[str],
-    auth_service: AuthService,
-    conversation_service: ConversationService
+    character_id: str,
+    auth_service: AuthService
 ) -> Optional[str]:
     """
     Authenticate a WebSocket connection
@@ -241,47 +185,28 @@ async def authenticate_connection(
             await websocket.close(code=4001, reason="User not found")
             return None
         
-        # Get conversation
-        conversation = conversation_service.get_conversation(conversation_id)
-        if not conversation:
+        # Verify the character belongs to the user
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(auth_service.db)
+        character = character_service.get_character(character_id)
+        
+        if not character:
             await websocket.send_json({
                 "type": "error",
-                "error": "Conversation not found",
+                "error": "Character not found",
                 "timestamp": datetime.now().isoformat()
             })
-            await websocket.close(code=4004, reason="Conversation not found")
+            await websocket.close(code=4004, reason="Character not found")
             return None
         
-        # Check access permissions
-        if not conversation_service.check_user_access(user_id, conversation_id):
+        if character.player_id != user_id:
             await websocket.send_json({
                 "type": "error",
-                "error": "No access to conversation",
+                "error": "Not authorized to use this character",
                 "timestamp": datetime.now().isoformat()
             })
-            await websocket.close(code=4003, reason="No access to conversation")
+            await websocket.close(code=4003, reason="Not authorized")
             return None
-        
-        # Check participant if provided
-        if participant_id:
-            participant = conversation_service.get_participant(participant_id)
-            if not participant or participant.conversation_id != conversation_id:
-                await websocket.send_json({
-                    "type": "error",
-                    "error": "Participant not found in conversation",
-                    "timestamp": datetime.now().isoformat()
-                })
-                await websocket.close(code=4003, reason="Participant not found")
-                return None
-                
-            if not participant.user_id or participant.user_id != user_id:
-                await websocket.send_json({
-                    "type": "error",
-                    "error": "Participant not controlled by user",
-                    "timestamp": datetime.now().isoformat()
-                })
-                await websocket.close(code=4003, reason="Participant not controlled by user")
-                return None
         
         return user_id
     
@@ -295,44 +220,99 @@ async def authenticate_connection(
         await websocket.close(code=4001, reason="Authentication failed")
         return None
 
-async def send_initial_info(
-    websocket: WebSocket,
-    conversation_id: str,
-    usage_service: UsageService,
-    user_id: str
-):
-    """Send initial information to a new connection"""
-    # Send presence information
-    active_users = connection_manager.get_active_users_in_conversation(conversation_id)
-    presence_payload = {
-        "type": "presence",
-        "active_users": list(active_users.values()),
-        "timestamp": datetime.now().isoformat()
-    }
-    await websocket.send_json(presence_payload)
-    
-    # Send usage limits
-    usage_info = {
-        "can_send_messages": usage_service.can_send_message(user_id),
-        "messages_remaining_today": usage_service.get_remaining_daily_messages(user_id),
-        "is_premium": usage_service.payment_service.is_premium(user_id)
-    }
-    usage_payload = {
-        "type": "usage_limits",
-        "usage": usage_info,
-        "timestamp": datetime.now().isoformat()
-    }
-    await websocket.send_json(usage_payload)
 
-# Main WebSocket handler
-async def handle_websocket_connection(
+async def send_initial_zone_data(
     websocket: WebSocket,
-    conversation_id: str,
+    zone_id: str,
+    character_id: str
+):
+    """Send initial zone data when a character connects to a zone"""
+    # Get entities in the zone
+    from app.services.entity_service import EntityService
+    from app.services.character_service import CharacterService
+    from app.database import get_db
+    
+    db = next(get_db())
+    entity_service = EntityService(db)
+    character_service = CharacterService(db)
+    
+    # Get characters in the zone
+    characters_in_zone = []
+    for char_id in connection_manager.get_characters_in_zone(zone_id):
+        if char_id != character_id:  # Don't include self
+            char = character_service.get_character(char_id)
+            if char:
+                characters_in_zone.append({
+                    "id": char.id,
+                    "name": char.name,
+                    "type": char.type
+                })
+    
+    # Get objects in the zone
+    entities, _, _ = entity_service.get_entities_in_zone(
+        zone_id=zone_id,
+        entity_type="object",
+        page=1,
+        page_size=100
+    )
+    
+    objects_in_zone = [{
+        "id": entity.id,
+        "name": entity.name,
+        "description": entity.description,
+        "type": entity.type
+    } for entity in entities]
+    
+    # Send the zone data
+    await websocket.send_json({
+        "type": "zone_data",
+        "zone_id": zone_id,
+        "characters": characters_in_zone,
+        "objects": objects_in_zone,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # Send recent zone messages/events
+    from app.services.event_service import EventService
+    event_service = EventService(db)
+    
+    recent_events = event_service.get_zone_events(
+        zone_id=zone_id,
+        character_id=character_id,
+        event_types=[EventType.MESSAGE],
+        limit=20
+    )
+    
+    if recent_events:
+        messages = []
+        for event in recent_events:
+            # Get character information
+            sender = character_service.get_character(event.character_id) if event.character_id else None
+            
+            messages.append({
+                "event_id": event.id,
+                "content": event.data.get("content", ""),
+                "character_id": event.character_id,
+                "character_name": sender.name if sender else "System",
+                "timestamp": event.created_at.isoformat()
+            })
+        
+        # Send the recent messages
+        await websocket.send_json({
+            "type": "recent_messages",
+            "messages": messages,
+            "timestamp": datetime.now().isoformat()
+        })
+
+
+async def handle_game_connection(
+    websocket: WebSocket,
+    character_id: str,
+    zone_id: str,
     token: str,
-    participant_id: Optional[str] = None,
     db: Session = None
 ):
-    """Handle a WebSocket connection"""
+    """Handle a WebSocket game connection for a character"""
     # Create DB session if not provided
     close_db = False
     if db is None:
@@ -348,25 +328,50 @@ async def handle_websocket_connection(
     
     # Initialize services
     auth_service = AuthService(db)
-    conversation_service = ConversationService(db)
-    message_service = MessageService(db)
-    usage_service = UsageService(db)
-    agent_manager = AgentManager(db)
+    event_service = EventService(db)
     
     # Authenticate and authorize connection
     user_id = await authenticate_connection(
-        websocket, token, conversation_id, participant_id,
-        auth_service, conversation_service
+        websocket, token, character_id, auth_service
     )
     
     if user_id is None:
         return  # Authentication failed
     
     # Register connection
-    await connection_manager.connect(websocket, conversation_id, user_id, participant_id)
+    await connection_manager.connect(websocket, character_id, zone_id)
     
-    # Send initial presence and usage info
-    await send_initial_info(websocket, conversation_id, usage_service, user_id)
+    # Send initial zone data
+    await send_initial_zone_data(websocket, zone_id, character_id)
+    
+    # Announce character entry to zone
+    entry_event = event_service.create_event(
+        type=EventType.SYSTEM,
+        data={
+            "message": "entered_zone"
+        },
+        character_id=character_id,
+        zone_id=zone_id,
+        scope=EventScope.PUBLIC
+    )
+    
+    # Broadcast entry to zone
+    entry_payload = {
+        "type": "game_event",
+        "event_type": "character_entered",
+        "character_id": character_id,
+        "zone_id": zone_id,
+        "timestamp": entry_event.created_at.isoformat()
+    }
+    
+    await connection_manager.broadcast_to_zone(
+        zone_id,
+        entry_payload,
+        exclude_character_id=character_id
+    )
+    
+    # Import event dispatcher
+    from app.websockets.event_dispatcher import event_registry
     
     # Main message loop
     try:
@@ -376,7 +381,7 @@ async def handle_websocket_connection(
             
             # Parse JSON
             try:
-                message_data = json.loads(data)
+                event_data = json.loads(data)
             except json.JSONDecodeError:
                 await websocket.send_json({
                     "type": "error",
@@ -386,28 +391,41 @@ async def handle_websocket_connection(
                 continue
             
             # Get event type
-            event_type = message_data.get("type", "message")
+            event_type = event_data.get("type", "message")
             
             # Dispatch to handler
             await event_registry.dispatcher.dispatch(
                 event_type,
                 websocket=websocket,
-                message_data=message_data,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                participant_id=participant_id,
-                message_service=message_service,
-                usage_service=usage_service,
-                agent_manager=agent_manager
+                event_data=event_data,
+                character_id=character_id,
+                zone_id=zone_id,
+                event_service=event_service
             )
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected: user {user_id}")
+        logger.info(f"WebSocket disconnected: character {character_id}")
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
         await websocket.close(code=1011, reason="Internal server error")
     finally:
+        # Create disconnect event
+        try:
+            event_service.create_event(
+                type=EventType.SYSTEM,
+                data={
+                    "message": "left_zone"
+                },
+                character_id=character_id,
+                zone_id=zone_id,
+                scope=EventScope.PUBLIC
+            )
+        except Exception as e:
+            logger.error(f"Error creating disconnect event: {str(e)}")
+        
         # Clean up
         connection_manager.disconnect(websocket)
+        
         if close_db and db:
             db.close()
-        logger.info("Connection closed")
+            
+        logger.info(f"Connection closed for character {character_id}")
