@@ -1,7 +1,7 @@
 # app/api/v1/worlds.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from sqlalchemy.orm import Session
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.database import get_db
 from app.api import schemas
@@ -31,13 +31,15 @@ async def create_world(
         owner_id=current_user.id,
         name=world.name,
         description=world.description,
-        settings=world.settings
+        settings=world.settings,
+        genre=world.genre if hasattr(world, 'genre') else None
     )
 
 
 @router.get("/", response_model=schemas.WorldList)
 async def list_worlds(
     name: Optional[str] = None,
+    genre: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("name"),
@@ -54,6 +56,9 @@ async def list_worlds(
     
     if name:
         filters['name'] = name
+    
+    if genre:
+        filters['genre'] = genre
     
     worlds, total_count, total_pages = world_service.get_worlds(
         filters=filters,
@@ -205,8 +210,54 @@ async def search_worlds(
     }
 
 
-@router.post("/zone-upgrade-checkout", response_model=Dict[str, str])
-async def create_zone_upgrade_checkout(
+@router.get(
+    "/{world_id}/limits",
+    response_model=Dict[str, Any]
+)
+async def get_world_limits(
+    world_id: str,
+    current_user: User = Depends(get_current_user),
+    world_service: WorldService = Depends(get_service(WorldService))
+):
+    """
+    Get zone limit information for a world based on its tier
+    
+    Returns information about zone capacity
+    """
+    world = world_service.get_world(world_id)
+    if not world:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="World not found"
+        )
+    
+    # Check access permissions
+    if not world_service.check_user_access(current_user.id, world_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to view this world"
+        )
+    
+    # Get current zone count
+    from app.services.zone_service import ZoneService
+    zone_service = ZoneService(next(get_db()))
+    zone_count = zone_service.count_zones_in_world(world_id)
+    
+    # Get zone limit based on tier
+    zone_limit = world_service.calculate_zone_limit(world.tier)
+    
+    return {
+        "tier": world.tier,
+        "zone_count": zone_count,
+        "zone_limit": zone_limit,
+        "remaining_capacity": zone_limit - zone_count,
+        "can_upgrade": True,  # Assuming upgrades are always possible
+        "is_owner": world.owner_id == current_user.id
+    }
+
+
+@router.post("/tier-upgrade-checkout", response_model=Dict[str, str])
+async def create_world_tier_upgrade_checkout(
     world_id: str = Body(..., embed=True),
     success_url: str = Body(..., embed=True),
     cancel_url: str = Body(..., embed=True),
@@ -215,7 +266,7 @@ async def create_zone_upgrade_checkout(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a checkout session for purchasing a zone limit upgrade
+    Create a checkout session for purchasing a world tier upgrade
     
     Returns a URL to redirect the user to for payment
     """
@@ -231,11 +282,11 @@ async def create_zone_upgrade_checkout(
         if world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can purchase zone upgrades"
+                detail="Only the world owner can purchase tier upgrades"
             )
         
-        # Create checkout for zone upgrade
-        checkout_url = payment_service.create_zone_upgrade_checkout(
+        # Create checkout for world tier upgrade
+        checkout_url = payment_service.create_world_tier_upgrade_checkout(
             user_id=current_user.id,
             world_id=world_id,
             success_url=success_url,

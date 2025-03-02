@@ -4,12 +4,15 @@ import logging
 from typing import List
 
 from app.database import SessionLocal, engine, Base
-from app.models.character import Character
+from app.models.character import Character, CharacterType
 from app.models.subscription import SubscriptionPlan
 from app.models.agent import Agent
 from app.models.world import World
-from app.config import get_settings
 from app.models.zone import Zone
+from app.models.player import Player
+from app.models.entity import Entity, EntityType
+from app.models.object import Object, ObjectType
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -27,7 +30,7 @@ def seed_subscription_plans(db: Session) -> List[SubscriptionPlan]:
     # Create subscription plans
     free_plan = SubscriptionPlan(
         name="Free",
-        description="Basic access to the chat platform",
+        description="Basic access to the platform",
         stripe_price_id="price_free",  # Placeholder, not used for payments
         price_amount=0,
         price_currency="usd",
@@ -40,7 +43,7 @@ def seed_subscription_plans(db: Session) -> List[SubscriptionPlan]:
     
     premium_plan = SubscriptionPlan(
         name="Premium",
-        description="Enhanced access with more characters and messages",
+        description="Enhanced access with more characters and worlds",
         stripe_price_id=settings.STRIPE_PREMIUM_PRICE_ID,
         price_amount=999,  # $9.99
         price_currency="usd",
@@ -69,6 +72,17 @@ def seed_default_agents(db: Session) -> List[Agent]:
         logger.info(f"Found {len(existing_agents)} existing agents")
         return existing_agents
     
+    # First create an entity for the agent
+    default_agent_entity = Entity(
+        name="Assistant",
+        description="A helpful AI assistant that can roleplay as various characters",
+        type=EntityType.AGENT,
+        tier=1
+    )
+    
+    db.add(default_agent_entity)
+    db.flush()  # Get the ID without fully committing
+    
     # Create default agent
     default_agent = Agent(
         name="Assistant",
@@ -79,7 +93,9 @@ def seed_default_agents(db: Session) -> List[Agent]:
             "Stay in character at all times, responding as your assigned character would. "
             "Be attentive and engaging, keeping your responses appropriate for the context of the conversation."
         ),
-        is_active=True
+        is_active=True,
+        entity_id=default_agent_entity.id,
+        tier=1
     )
     
     # Add agent to database
@@ -101,6 +117,39 @@ def seed_character_templates(db: Session) -> List[Character]:
     
     # Create character templates
     templates = []
+    
+    # Create entities first
+    paladin_entity = Entity(
+        name="Sir Aldric the Valiant",
+        description="A noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent.",
+        type=EntityType.CHARACTER,
+        tier=1
+    )
+    
+    rogue_entity = Entity(
+        name="Selene Nightshade",
+        description="A cunning rogue and master of stealth, deception, and quick wit.",
+        type=EntityType.CHARACTER,
+        tier=1
+    )
+    
+    mage_entity = Entity(
+        name="Thorne Spellweaver",
+        description="An eccentric and brilliant arcane mage with vast knowledge of the magical arts.",
+        type=EntityType.CHARACTER,
+        tier=1
+    )
+    
+    barbarian_entity = Entity(
+        name="Krag Skullcrusher",
+        description="A mighty barbarian warrior from the northern mountains.",
+        type=EntityType.CHARACTER,
+        tier=1
+    )
+    
+    # Add entities to db to get IDs
+    db.add_all([paladin_entity, rogue_entity, mage_entity, barbarian_entity])
+    db.flush()
     
     # Paladin template
     paladin = Character(
@@ -131,7 +180,10 @@ Example Translations:
 Remain in character at all times, shaping responses as Sir Aldric would. Let honor guide your words and actions.
 """,
         is_template=True,
-        is_public=True
+        is_public=True,
+        type=CharacterType.PLAYER,
+        entity_id=paladin_entity.id,
+        tier=1
     )
     templates.append(paladin)
     
@@ -164,7 +216,10 @@ Example Translations:
 Stay in character at all times. Every word should carry Selene's cunning, charm, and roguish attitude.
 """,
         is_template=True,
-        is_public=True
+        is_public=True,
+        type=CharacterType.PLAYER,
+        entity_id=rogue_entity.id,
+        tier=1
     )
     templates.append(rogue)
     
@@ -197,7 +252,10 @@ Example Translations:
 Every response should convey Thorne's magical expertise, intellectual curiosity, and slightly disconnected perspective on mundane matters.
 """,
         is_template=True,
-        is_public=True
+        is_public=True,
+        type=CharacterType.PLAYER,
+        entity_id=mage_entity.id,
+        tier=1
     )
     templates.append(mage)
     
@@ -230,7 +288,10 @@ Example Translations:
 Each response should emphasize Krag's physical strength, direct approach to problems, and tribal warrior worldview. Use occasional third-person self-reference for emphasis.
 """,
         is_template=True,
-        is_public=True
+        is_public=True,
+        type=CharacterType.PLAYER,
+        entity_id=barbarian_entity.id,
+        tier=1
     )
     templates.append(barbarian)
     
@@ -242,6 +303,7 @@ Each response should emphasize Krag's physical strength, direct approach to prob
     logger.info(f"Created {len(templates)} character templates")
     
     return templates
+
 
 def seed_starter_worlds(db: Session) -> List[World]:
     """Seed the database with starter worlds"""
@@ -260,20 +322,20 @@ def seed_starter_worlds(db: Session) -> List[World]:
         name="Eldoria",
         description="A high fantasy realm of magic, dragons, and epic quests. Eldoria is home to diverse races including humans, elves, dwarves, and magical creatures.",
         genre="Fantasy",
-        settings="""
-{
-    "magic_level": "high",
-    "technology_level": "medieval",
-    "races": ["humans", "elves", "dwarves", "orcs", "halflings"],
-    "major_regions": ["The Northern Kingdoms", "Elven Forests", "Dwarven Mountains", "The Mystical Isles"]
-}""",
+        properties={
+            "magic_level": "high",
+            "technology_level": "medieval",
+            "races": ["humans", "elves", "dwarves", "orcs", "halflings"],
+            "major_regions": ["The Northern Kingdoms", "Elven Forests", "Dwarven Mountains", "The Mystical Isles"]
+        },
         default_prompt="""
 You are in Eldoria, a high fantasy realm where magic flows through the very air and epic quests await brave adventurers. 
 Dragons soar through the skies, ancient ruins hide forgotten treasures, and the forces of darkness gather in the shadows.
 Characters in this world should speak and act according to fantasy tropes and medieval customs.
 """,
         is_starter=True,
-        is_public=True
+        is_public=True,
+        tier=1  # Default tier
     )
     worlds.append(fantasy)
     
@@ -282,20 +344,20 @@ Characters in this world should speak and act according to fantasy tropes and me
         name="Nova Prime",
         description="A futuristic sci-fi universe with interstellar travel, advanced technology, and alien civilizations spread across the galaxy.",
         genre="Science Fiction",
-        settings="""
-{
-    "tech_level": "advanced",
-    "ftl_travel": true,
-    "alien_races": 12,
-    "major_factions": ["Terran Alliance", "Zorn Collective", "Free Traders Guild", "The Ancient Ones"]
-}""",
+        properties={
+            "tech_level": "advanced",
+            "ftl_travel": True,
+            "alien_races": 12,
+            "major_factions": ["Terran Alliance", "Zorn Collective", "Free Traders Guild", "The Ancient Ones"]
+        },
         default_prompt="""
 You are in Nova Prime, a vast sci-fi universe in the year 3752 CE. Humanity has spread among the stars, encountering numerous alien civilizations.
 Faster-than-light travel is common, AI companions are ubiquitous, and genetic engineering has created specialized human variants.
 Characters should reference advanced technology, space travel, and the complex political landscape of competing interstellar factions.
 """,
         is_starter=True,
-        is_public=True
+        is_public=True,
+        tier=1  # Default tier
     )
     worlds.append(scifi)
     
@@ -304,13 +366,12 @@ Characters should reference advanced technology, space travel, and the complex p
         name="Wasteland",
         description="A gritty post-apocalyptic world where survivors struggle to rebuild civilization after a global catastrophe.",
         genre="Post-Apocalyptic",
-        settings="""
-{
-    "apocalypse_type": "nuclear war",
-    "years_since_fall": 87,
-    "radiation_zones": ["Dead Cities", "The Glowing Sea"],
-    "factions": ["Survivors Union", "Raiders", "The New Government", "Mutant Collective"]
-}""",
+        properties={
+            "apocalypse_type": "nuclear war",
+            "years_since_fall": 87,
+            "radiation_zones": ["Dead Cities", "The Glowing Sea"],
+            "factions": ["Survivors Union", "Raiders", "The New Government", "Mutant Collective"]
+        },
         default_prompt="""
 You are in the Wasteland, 87 years after nuclear war devastated civilization. Resources are scarce, dangers lurk everywhere,
 and different factions fight for control of what remains. Radiation has mutated some creatures and humans, creating new threats.
@@ -318,7 +379,8 @@ Characters should be hardened by the harsh reality of survival, referencing scav
 struggle to find clean water, food, and supplies.
 """,
         is_starter=True,
-        is_public=True
+        is_public=True,
+        tier=1  # Default tier
     )
     worlds.append(postapoc)
     
@@ -327,13 +389,12 @@ struggle to find clean water, food, and supplies.
         name="Shadow Veil",
         description="A modern world where supernatural creatures exist in the shadows of human society. Vampires run nightclubs, werewolves live in the forests, and witches practice their craft in secret.",
         genre="Urban Fantasy",
-        settings="""
-{
-    "time_period": "modern day",
-    "supernatural_types": ["vampires", "werewolves", "witches", "fae", "ghosts"],
-    "magic_visibility": "hidden from most humans",
-    "major_locations": ["Crescent City", "The Undermarket", "Fae Realms"]
-}""",
+        properties={
+            "time_period": "modern day",
+            "supernatural_types": ["vampires", "werewolves", "witches", "fae", "ghosts"],
+            "magic_visibility": "hidden from most humans",
+            "major_locations": ["Crescent City", "The Undermarket", "Fae Realms"]
+        },
         default_prompt="""
 You are in Shadow Veil, a world identical to modern Earth but with a secret supernatural society hidden from human eyes.
 Vampires control nightlife businesses, werewolves protect wilderness areas, witches form covens in urban areas, and fae creatures
@@ -341,7 +402,8 @@ slip between our world and theirs. Characters should reference modern technology
 careful balance between the mundane world and the supernatural one.
 """,
         is_starter=True,
-        is_public=True
+        is_public=True,
+        tier=1  # Default tier
     )
     worlds.append(supernatural)
     
@@ -353,6 +415,7 @@ careful balance between the mundane world and the supernatural one.
     
     logger.info(f"Created {len(worlds)} starter worlds")
     return worlds
+
 
 def seed_starter_zones(db: Session) -> List[Zone]:
     """Seed the database with starter zones for each starter world"""
@@ -379,7 +442,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Eldoria Capital",
                 description="The grand capital city of Eldoria, with towering spires, magical academies, and bustling markets.",
                 zone_type="city",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(capital)
             
@@ -387,7 +451,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Northern Wilds",
                 description="A vast region of untamed forests, mountains, and valleys, home to dangerous creatures and hidden treasures.",
                 zone_type="wilderness",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(northern_wilds)
             
@@ -395,7 +460,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Silverleaf Forest",
                 description="Ancient forest realm of the elves, with trees older than human civilization and magical glades.",
                 zone_type="forest",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(elven_forest)
             
@@ -403,7 +469,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Irondeep Mountains",
                 description="Mountain range containing the legendary dwarven kingdom with vast mines and forges.",
                 zone_type="mountains",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(dwarven_halls)
             
@@ -418,7 +485,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Home of the human king and center of government.",
                 zone_type="building",
                 world_id=world.id,
-                parent_zone_id=capital.id
+                parent_zone_id=capital.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -426,7 +494,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Bustling commercial area with shops, markets and guilds.",
                 zone_type="district",
                 world_id=world.id,
-                parent_zone_id=capital.id
+                parent_zone_id=capital.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -434,7 +503,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Prestigious magical academy where mages study ancient arts.",
                 zone_type="building",
                 world_id=world.id,
-                parent_zone_id=capital.id
+                parent_zone_id=capital.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -442,7 +512,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Dangerous, snow-covered mountains home to frost giants and white dragons.",
                 zone_type="mountains",
                 world_id=world.id,
-                parent_zone_id=northern_wilds.id
+                parent_zone_id=northern_wilds.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -450,7 +521,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Foggy forest where the veil between realms is thin and fae creatures appear.",
                 zone_type="forest",
                 world_id=world.id,
-                parent_zone_id=northern_wilds.id
+                parent_zone_id=northern_wilds.id,
+                tier=1  # Default tier
             ))
             
         elif world.name == "Nova Prime": # Sci-fi world
@@ -459,7 +531,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Nexus Station",
                 description="Massive space station serving as the administrative center of the Terran Alliance.",
                 zone_type="space_station",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(central_hub)
             
@@ -467,7 +540,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Sol System",
                 description="Birthplace of humanity, now a densely populated core system with Earth as its jewel.",
                 zone_type="star_system",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(earth_system)
             
@@ -475,7 +549,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="The Frontier",
                 description="Newly discovered systems on the edge of known space, largely unexplored and dangerous.",
                 zone_type="region",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(frontier)
             
@@ -483,7 +558,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Zorn Collective Space",
                 description="Territory controlled by the technologically advanced Zorn species.",
                 zone_type="region",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(alien_territory)
             
@@ -498,7 +574,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Military and administrative heart of Nexus Station.",
                 zone_type="section",
                 world_id=world.id,
-                parent_zone_id=central_hub.id
+                parent_zone_id=central_hub.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -506,7 +583,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Commercial center where merchants from across the galaxy conduct business.",
                 zone_type="section",
                 world_id=world.id,
-                parent_zone_id=central_hub.id
+                parent_zone_id=central_hub.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -514,7 +592,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Humanity's homeworld, now a carefully preserved planet with limited population.",
                 zone_type="planet",
                 world_id=world.id,
-                parent_zone_id=earth_system.id
+                parent_zone_id=earth_system.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -522,7 +601,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="First human settlement beyond Earth, now a thriving industrial center.",
                 zone_type="planet",
                 world_id=world.id,
-                parent_zone_id=earth_system.id
+                parent_zone_id=earth_system.id,
+                tier=1  # Default tier
             ))
             
         elif world.name == "Wasteland": # Post-apocalyptic world
@@ -531,7 +611,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Haven",
                 description="The largest survivor settlement, built within the ruins of an old sports stadium.",
                 zone_type="settlement",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(haven)
             
@@ -539,7 +620,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Dead City",
                 description="Ruins of a major pre-war metropolis, highly radioactive but filled with valuable tech.",
                 zone_type="ruins",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(dead_city)
             
@@ -547,7 +629,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="The Great Wastes",
                 description="Vast desert-like region where survival is nearly impossible due to radiation and lack of water.",
                 zone_type="wasteland",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(wastes)
             
@@ -562,7 +645,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Central trading area where survivors barter goods.",
                 zone_type="district",
                 world_id=world.id,
-                parent_zone_id=haven.id
+                parent_zone_id=haven.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -570,7 +654,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Defensive perimeter of Haven, constantly guarded against raiders.",
                 zone_type="fortification",
                 world_id=world.id,
-                parent_zone_id=haven.id
+                parent_zone_id=haven.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -578,7 +663,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Former financial district, now a labyrinth of collapsed skyscrapers.",
                 zone_type="ruins",
                 world_id=world.id,
-                parent_zone_id=dead_city.id
+                parent_zone_id=dead_city.id,
+                tier=1  # Default tier
             ))
             
         elif world.name == "Shadow Veil": # Urban fantasy world
@@ -587,7 +673,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="Crescent City",
                 description="A modern metropolis where supernatural creatures hide in plain sight among humans.",
                 zone_type="city",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(city)
             
@@ -595,7 +682,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 name="The Veil",
                 description="The supernatural realm that overlaps with the human world, accessible only to magical beings.",
                 zone_type="realm",
-                world_id=world.id
+                world_id=world.id,
+                tier=1  # Default tier
             )
             zones.append(otherside)
             
@@ -610,7 +698,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Downtown area with high supernatural population, featuring clubs, bars, and magical shops.",
                 zone_type="district",
                 world_id=world.id,
-                parent_zone_id=city.id
+                parent_zone_id=city.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -618,7 +707,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Magical realm within The Veil where the fae nobility resides.",
                 zone_type="realm",
                 world_id=world.id,
-                parent_zone_id=otherside.id
+                parent_zone_id=otherside.id,
+                tier=1  # Default tier
             ))
             
             zones.append(Zone(
@@ -626,7 +716,8 @@ def seed_starter_zones(db: Session) -> List[Zone]:
                 description="Hidden supernatural marketplace accessible only through secret entrances.",
                 zone_type="market",
                 world_id=world.id,
-                parent_zone_id=city.id
+                parent_zone_id=city.id,
+                tier=1  # Default tier
             ))
     
     # Save all zones
@@ -636,7 +727,85 @@ def seed_starter_zones(db: Session) -> List[Zone]:
     logger.info(f"Created {total_created} zones across {len(starter_worlds)} starter worlds")
     return zones
 
-# Update the seed_database function to include zones
+
+def seed_starter_objects(db: Session) -> List[Object]:
+    """Seed the database with starter objects for the zones"""
+    
+    # Check if objects already exist
+    existing_objects = db.query(Object).all()
+    if existing_objects:
+        logger.info(f"Found {len(existing_objects)} existing objects")
+        return existing_objects
+    
+    # Get fantasy world zones to add objects to
+    world = db.query(World).filter(World.name == "Eldoria").first()
+    if not world:
+        logger.info("Fantasy world not found, skipping object creation")
+        return []
+    
+    capital = db.query(Zone).filter(Zone.name == "Eldoria Capital", Zone.world_id == world.id).first()
+    merchant_district = db.query(Zone).filter(Zone.name == "Merchant District", Zone.parent_zone_id == capital.id).first()
+    
+    if not merchant_district:
+        logger.info("Required zones not found, skipping object creation")
+        return []
+    
+    # Create objects
+    objects = []
+    
+    # Create entities first
+    blacksmith_entity = Entity(
+        name="Blacksmith's Forge",
+        description="A busy forge where weapons and armor are crafted by a master blacksmith.",
+        type=EntityType.OBJECT,
+        tier=1
+    )
+    
+    tavern_entity = Entity(
+        name="The Prancing Pony",
+        description="A cozy tavern where adventurers gather to share tales and information.",
+        type=EntityType.OBJECT,
+        tier=1
+    )
+    
+    db.add_all([blacksmith_entity, tavern_entity])
+    db.flush()
+    
+    # Create objects with their entities
+    blacksmith = Object(
+        name="Blacksmith's Forge",
+        description="A busy forge where weapons and armor are crafted by a master blacksmith.",
+        type=ObjectType.GENERIC,
+        is_interactive=True,
+        world_id=world.id,
+        zone_id=merchant_district.id,
+        entity_id=blacksmith_entity.id,
+        tier=1
+    )
+    objects.append(blacksmith)
+    
+    tavern = Object(
+        name="The Prancing Pony",
+        description="A cozy tavern where adventurers gather to share tales and information.",
+        type=ObjectType.GENERIC,
+        is_interactive=True,
+        world_id=world.id,
+        zone_id=merchant_district.id,
+        entity_id=tavern_entity.id,
+        tier=1
+    )
+    objects.append(tavern)
+    
+    # Add objects to database
+    for obj in objects:
+        db.add(obj)
+    
+    db.commit()
+    logger.info(f"Created {len(objects)} starter objects")
+    return objects
+
+
+# Update the seed_database function to include starter objects
 def seed_database():
     """Seed the database with initial data"""
     logger.info("Starting database seeding...")
@@ -662,6 +831,9 @@ def seed_database():
         
         # Seed starter zones
         seed_starter_zones(db)
+        
+        # Seed starter objects
+        seed_starter_objects(db)
         
         logger.info("Database seeding completed successfully")
     

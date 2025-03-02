@@ -39,9 +39,9 @@ class ZoneService:
         if not world:
             return None
         
-        # Check zone limit
+        # Check zone limit based on world's tier
         zone_count = self.db.query(Zone).filter(Zone.world_id == world_id).count()
-        if zone_count >= world.total_zone_limit:
+        if zone_count >= self.get_world_zone_limit(world.tier):
             return None
         
         # Validate parent zone if provided
@@ -54,13 +54,14 @@ class ZoneService:
             if not parent_zone:
                 return None
         
-        # Create zone
+        # Create zone with tier 1 by default
         zone = Zone(
             name=name,
             description=description,
             settings=settings,
             world_id=world_id,
-            parent_zone_id=parent_zone_id
+            parent_zone_id=parent_zone_id,
+            tier=1  # Default tier for new zones
         )
         
         self.db.add(zone)
@@ -306,37 +307,78 @@ class ZoneService:
         return self.db.query(func.count(Entity.id)).filter(Entity.zone_id == zone_id).scalar() or 0
 
     def can_add_entity_to_zone(self, zone_id: str) -> bool:
-        """Check if a zone has reached its entity limit"""
+        """Check if a zone has reached its entity limit based on tier"""
         zone = self.get_zone(zone_id)
         if not zone:
             return False
             
         entity_count = self.count_entities_in_zone(zone_id)
-        return entity_count < zone.total_entity_limit
+        return entity_count < self.get_zone_entity_limit(zone.tier)
 
     def get_zone_entity_limits(self, zone_id: str) -> Dict[str, Any]:
-        """Get entity limit information for a zone"""
+        """Get entity limit information for a zone based on tier"""
         zone = self.get_zone(zone_id)
         if not zone:
             return None
             
         entity_count = self.count_entities_in_zone(zone_id)
+        entity_limit = self.get_zone_entity_limit(zone.tier)
         
         return {
             "entity_count": entity_count,
-            "base_limit": zone.entity_limit,
-            "upgrades_purchased": zone.entity_limit_upgrades,
-            "total_limit": zone.total_entity_limit,
-            "remaining_capacity": zone.total_entity_limit - entity_count
+            "tier": zone.tier,
+            "entity_limit": entity_limit,
+            "remaining_capacity": entity_limit - entity_count
         }
 
-    def upgrade_zone_entity_limit(self, zone_id: str) -> bool:
-        """Increase a zone's entity limit by purchasing an upgrade"""
+    def get_zone_entity_limit(self, tier: int) -> int:
+        """
+        Get the entity limit for a zone based on its tier
+        
+        Args:
+            tier: The zone's tier
+            
+        Returns:
+            The maximum number of entities the zone can contain
+        """
+        # Base entity limit for tier 1
+        BASE_ENTITY_LIMIT = 25
+        
+        # Formula: base * tier (can be adjusted with more complex formulas as needed)
+        return BASE_ENTITY_LIMIT * tier
+
+    def get_world_zone_limit(self, world_tier: int) -> int:
+        """
+        Get the zone limit for a world based on its tier
+        
+        Args:
+            world_tier: The world's tier
+            
+        Returns:
+            The maximum number of zones the world can contain
+        """
+        # Base zone limit for tier 1
+        BASE_ZONE_LIMIT = 10
+        
+        # Formula: base * tier (can be adjusted with more complex formulas as needed)
+        return BASE_ZONE_LIMIT * world_tier
+
+    def upgrade_zone_tier(self, zone_id: str) -> bool:
+        """
+        Upgrade a zone's tier
+        
+        Args:
+            zone_id: ID of the zone to upgrade
+            
+        Returns:
+            True if successful, False otherwise
+        """
         zone = self.get_zone(zone_id)
         if not zone:
             return False
             
-        zone.entity_limit_upgrades += 1
+        # Increment tier
+        zone.tier += 1
         self.db.commit()
         
         return True

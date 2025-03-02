@@ -7,6 +7,10 @@ import math
 from app.models.world import World
 from app.models.player import User
 
+# Import the updated name (Player instead of User)
+# Note: The model name in the database may still be User until migrated
+from app.models.player import Player
+
 
 class WorldService:
     """Service for handling world operations"""
@@ -18,7 +22,10 @@ class WorldService:
                     owner_id: str, 
                     name: str, 
                     description: Optional[str] = None,
-                    settings: Optional[Dict[str, Any]] = None) -> World:
+                    settings: Optional[Dict[str, Any]] = None,
+                    genre: Optional[str] = None,
+                    is_premium: bool = False,
+                    price: Optional[float] = None) -> World:
         """
         Create a new world
         
@@ -27,12 +34,18 @@ class WorldService:
             name: Name of the world
             description: Description of the world
             settings: JSON settings for world configuration
+            genre: Optional genre for the world
+            is_premium: Whether this is a premium world
+            price: Optional price if purchased as a premium world
         """
+        # Create world with tier 1 by default
         world = World(
             name=name,
             description=description,
             settings=settings,
-            owner_id=owner_id
+            owner_id=owner_id,
+            genre=genre if genre else None,
+            tier=1  # Default tier for new worlds
         )
         
         self.db.add(world)
@@ -76,6 +89,9 @@ class WorldService:
             
             if 'description' in filters:
                 query = query.filter(World.description.ilike(f"%{filters['description']}%"))
+                
+            if 'genre' in filters:
+                query = query.filter(World.genre == filters['genre'])
                 
             if 'search' in filters and filters['search']:
                 search_term = f"%{filters['search']}%"
@@ -153,7 +169,7 @@ class WorldService:
             return True
         
         # Check if user is admin
-        user = self.db.query(User).filter(User.id == user_id).first()
+        user = self.db.query(Player).filter(Player.id == user_id).first()
         if user and user.is_admin:
             return True
             
@@ -184,13 +200,78 @@ class WorldService:
             page_size=page_size
         )
         
-    def upgrade_world_zone_limit(self, world_id: str) -> bool:
-        """Increase a world's zone limit by purchasing an upgrade"""
+    def get_world_zone_limit(self, world_id: str) -> int:
+        """
+        Get the zone limit for a world based on its tier
+        
+        Args:
+            world_id: ID of the world
+            
+        Returns:
+            The maximum number of zones the world can contain
+        """
+        world = self.get_world(world_id)
+        if not world:
+            return 0
+            
+        return self.calculate_zone_limit(world.tier)
+        
+    def calculate_zone_limit(self, tier: int) -> int:
+        """
+        Calculate zone limit based on tier
+        
+        Args:
+            tier: The world's tier
+            
+        Returns:
+            The maximum number of zones the world can contain
+        """
+        # Base zone limit for tier 1
+        BASE_ZONE_LIMIT = 10
+        
+        # Formula: base * tier (can be adjusted with more complex formulas as needed)
+        return BASE_ZONE_LIMIT * tier
+        
+    def upgrade_world_tier(self, world_id: str) -> bool:
+        """
+        Upgrade a world's tier
+        
+        Args:
+            world_id: ID of the world to upgrade
+            
+        Returns:
+            True if successful, False otherwise
+        """
         world = self.get_world(world_id)
         if not world:
             return False
             
-        world.zone_limit_upgrades += 1
+        # Increment tier
+        world.tier += 1
         self.db.commit()
         
         return True
+        
+    def can_add_zone_to_world(self, world_id: str) -> bool:
+        """
+        Check if a world has reached its zone limit based on tier
+        
+        Args:
+            world_id: ID of the world
+            
+        Returns:
+            True if more zones can be added, False otherwise
+        """
+        world = self.get_world(world_id)
+        if not world:
+            return False
+            
+        # Get current zone count
+        from app.services.zone_service import ZoneService
+        zone_service = ZoneService(self.db)
+        zone_count = zone_service.count_zones_in_world(world_id)
+        
+        # Get the zone limit based on tier
+        zone_limit = self.calculate_zone_limit(world.tier)
+        
+        return zone_count < zone_limit

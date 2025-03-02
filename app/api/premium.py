@@ -5,7 +5,7 @@ from functools import wraps
 from typing import Callable, Type
 
 from app.database import get_db
-from app.models.player import User
+from app.models.player import User  # Still using User in imports for compatibility
 from app.api.auth import get_current_user
 from app.services.payment_service import PaymentService
 from app.services.usage_service import UsageService
@@ -65,6 +65,7 @@ def require_premium(current_user: User = Depends(get_current_user), db: Session 
 def check_character_limit(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     """
     Dependency to check if user can create more characters
+    (Character limits are determined by tier-based calculations)
     
     Example:
         @router.post("/characters")
@@ -92,9 +93,41 @@ def check_character_limit(current_user: User = Depends(get_current_user), db: Se
     return current_user
 
 
+def check_world_limit(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+    """
+    Dependency to check if user can create more worlds
+    (World limits are determined by tier-based calculations)
+    
+    Example:
+        @router.post("/worlds")
+        async def create_world(
+            user_with_capacity: User = Depends(check_world_limit),
+            ...
+        ):
+            # This will only execute if user can create more worlds
+            ...
+    """
+    usage_service = UsageService(db)
+    if not usage_service.can_create_world(current_user.id):
+        # Determine if it's due to free plan or just hitting the premium limit
+        is_premium = usage_service.payment_service.is_premium(current_user.id)
+        if is_premium:
+            detail = "You have reached your world limit. Please delete some worlds to create more."
+        else:
+            detail = "You have reached the world limit for free users. Please upgrade to premium for more worlds."
+        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail
+        )
+    
+    return current_user
+
+
 def check_conversation_limit(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     """
     Dependency to check if user can create more conversations
+    (Conversation limits are determined by tier-based calculations)
     
     Example:
         @router.post("/conversations")
@@ -125,6 +158,7 @@ def check_conversation_limit(current_user: User = Depends(get_current_user), db:
 def check_message_limit(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     """
     Dependency to check if user can send more messages today
+    (Message limits are determined by tier-based calculations)
     
     Example:
         @router.post("/messages")
@@ -155,6 +189,7 @@ def check_message_limit(current_user: User = Depends(get_current_user), db: Sess
 def check_public_character_permission(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     """
     Dependency to check if user can make characters public
+    (Premium users can make characters public)
     
     Example:
         @router.post("/characters/{character_id}/public")
@@ -170,6 +205,49 @@ def check_public_character_permission(current_user: User = Depends(get_current_u
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Making characters public is a premium feature. Please upgrade to premium to use this feature."
+        )
+    
+    return current_user
+
+
+def check_world_tier_upgrade_permission(current_user: User = Depends(get_current_user), 
+                                        world_id: str = None,
+                                        db: Session = Depends(get_db)) -> User:
+    """
+    Dependency to check if user is the owner of a world and can upgrade its tier
+    
+    Example:
+        @router.post("/worlds/{world_id}/upgrade-tier")
+        async def upgrade_world_tier(
+            world_id: str,
+            user_with_permission: User = Depends(
+                lambda: check_world_tier_upgrade_permission(world_id=world_id)
+            ),
+            ...
+        ):
+            # This will only execute if user owns the world
+    """
+    if not world_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="World ID is required"
+        )
+    
+    # Check if user is the world owner
+    from app.services.world_service import WorldService
+    world_service = WorldService(db)
+    
+    world = world_service.get_world(world_id)
+    if not world:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="World not found"
+        )
+    
+    if world.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the world owner can upgrade its tier"
         )
     
     return current_user
