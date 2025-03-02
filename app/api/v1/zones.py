@@ -29,7 +29,7 @@ async def create_zone(
     
     This checks that:
     1. The user has access to the world
-    2. The world has not reached its zone limit
+    2. The world has not reached its tier-based zone limit
     3. If parent_zone_id is provided, it's a valid zone in the same world
     """
     # Check if user has access to the world
@@ -47,12 +47,12 @@ async def create_zone(
             detail="Only the world owner can create zones"
         )
     
-    # Check zone limit
-    zone_count = zone_service.count_zones_in_world(zone.world_id)
-    if zone_count >= world.total_zone_limit:
+    # Check zone limit based on world's tier
+    if not world_service.can_add_zone_to_world(zone.world_id):
+        zone_limit = world_service.calculate_zone_limit(world.tier)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Zone limit reached ({zone_count}/{world.total_zone_limit}). Purchase an upgrade to create more zones."
+            detail=f"Zone limit reached (maximum: {zone_limit} for tier {world.tier}). Upgrade the world tier to create more zones."
         )
     
     # Create the zone
@@ -180,8 +180,7 @@ async def get_zone_hierarchy(
             settings=zone.settings,
             world_id=zone.world_id,
             parent_zone_id=zone.parent_zone_id,
-            entity_limit=zone.entity_limit,
-            entity_limit_upgrades=zone.entity_limit_upgrades,
+            tier=zone.tier,  # Include tier information
             created_at=zone.created_at,
             sub_zones=[]
         )
@@ -231,11 +230,16 @@ async def get_zone(
     # Count entities
     entity_count = zone_service.count_entities_in_zone(zone_id)
     
+    # Get entity limits based on tier
+    entity_limit = zone_service.get_zone_entity_limit(zone.tier)
+    
     # Create response
     response = {
         **zone.__dict__,
         "sub_zone_count": sub_zone_count,
-        "entity_count": entity_count
+        "entity_count": entity_count,
+        "entity_limit": entity_limit,
+        "remaining_capacity": entity_limit - entity_count
     }
     
     return response
@@ -330,9 +334,9 @@ async def get_zone_entity_limits(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get entity limit information for a zone
+    Get entity limit information for a zone based on tier
     
-    Returns current entity count, limit, and upgrade information
+    Returns current entity count, tier-based limit, and upgrade information
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -348,7 +352,7 @@ async def get_zone_entity_limits(
             detail="You don't have access to this world"
         )
     
-    # Get zone entity limits
+    # Get zone entity limits based on tier
     limits = zone_service.get_zone_entity_limits(zone_id)
     
     # Check if user is the world owner (for purchase options)
@@ -362,8 +366,8 @@ async def get_zone_entity_limits(
     }
 
 
-@router.post("/entity-limit-upgrade-checkout", response_model=Dict[str, str])
-async def create_entity_limit_upgrade_checkout(
+@router.post("/tier-upgrade-checkout", response_model=Dict[str, str])
+async def create_zone_tier_upgrade_checkout(
     zone_id: str = Body(..., embed=True),
     success_url: str = Body(..., embed=True),
     cancel_url: str = Body(..., embed=True),
@@ -373,7 +377,7 @@ async def create_entity_limit_upgrade_checkout(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a checkout session for purchasing an entity limit upgrade
+    Create a checkout session for purchasing a zone tier upgrade
     
     Returns a URL to redirect the user to for payment
     """
@@ -398,11 +402,11 @@ async def create_entity_limit_upgrade_checkout(
         if world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can purchase entity limit upgrades"
+                detail="Only the world owner can purchase zone tier upgrades"
             )
         
-        # Create checkout for entity limit upgrade
-        checkout_url = payment_service.create_entity_limit_upgrade_checkout(
+        # Create checkout for zone tier upgrade
+        checkout_url = payment_service.create_zone_tier_upgrade_checkout(
             user_id=current_user.id,
             zone_id=zone_id,
             success_url=success_url,

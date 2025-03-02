@@ -1,7 +1,7 @@
 # app/api/v1/agents.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from app.database import get_db
 from app.api import schemas
@@ -10,6 +10,7 @@ from app.api.dependencies import get_service
 from app.services.agent_service import AgentService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
+from app.services.payment_service import PaymentService
 from app.models.player import User
 from app.models.agent import Agent
 
@@ -29,7 +30,7 @@ async def create_agent(
     
     If zone_id is provided, checks:
     1. User has access to the zone's world
-    2. The zone has not reached its entity limit
+    2. The zone has not reached its entity limit based on tier
     """
     # If zone_id is provided, check access
     if agent.zone_id:
@@ -48,11 +49,26 @@ async def create_agent(
                 detail="Only the world owner can create agents in a zone"
             )
         
-        # Check zone entity limit
+        # Check zone entity limit based on tier
         if not zone_service.can_add_entity_to_zone(agent.zone_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Zone entity limit reached. Purchase an upgrade to add more entities."
+                detail=f"Zone has reached its entity limit for tier {zone.tier}. Upgrade the zone tier to add more entities."
+            )
+    
+    # If world_id is provided without zone_id, check access
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="World not found"
+            )
+        
+        if world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can create agents in a world"
             )
     
     # Create the agent
@@ -61,13 +77,14 @@ async def create_agent(
         description=agent.description,
         system_prompt=agent.system_prompt,
         zone_id=agent.zone_id,
+        world_id=agent.world_id,
         settings=agent.settings
     )
     
     if not new_agent:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to create agent"
+            detail="Failed to create agent. The zone may have reached its entity limit."
         )
     
     return new_agent
@@ -77,6 +94,7 @@ async def create_agent(
 async def list_agents(
     is_active: Optional[bool] = None,
     zone_id: Optional[str] = Query(None, description="Filter agents by zone"),
+    world_id: Optional[str] = Query(None, description="Filter agents by world"),
     name: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -117,6 +135,24 @@ async def list_agents(
             )
         
         filters['zone_id'] = zone_id
+    
+    # If world_id is provided, check access
+    if world_id:
+        world = world_service.get_world(world_id)
+        if not world:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="World not found"
+            )
+        
+        # Check world access
+        if not world_service.check_user_access(current_user.id, world_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this world"
+            )
+        
+        filters['world_id'] = world_id
     
     agents, total_count, total_pages = agent_service.get_agents(
         filters=filters,
@@ -163,6 +199,13 @@ async def get_agent(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this agent's world"
             )
+    # If agent is in a world directly, check world access
+    elif agent.world_id:
+        if not world_service.check_user_access(current_user.id, agent.world_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this agent's world"
+            )
     
     return agent
 
@@ -172,6 +215,7 @@ async def search_agents(
     query: str = Query(..., min_length=1),
     include_inactive: bool = Query(False, title="Include inactive agents in results"),
     zone_id: Optional[str] = Query(None, description="Filter search to specific zone"),
+    world_id: Optional[str] = Query(None, description="Filter search to specific world"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -184,7 +228,7 @@ async def search_agents(
     
     Returns a paginated list of matching agents
     """
-    # If zone_id is provided, check access
+    # Validate zone access if provided
     if zone_id:
         zone = zone_service.get_zone(zone_id)
         if not zone:
@@ -200,10 +244,27 @@ async def search_agents(
                 detail="You don't have access to this world"
             )
     
+    # Validate world access if provided
+    if world_id:
+        world = world_service.get_world(world_id)
+        if not world:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="World not found"
+            )
+        
+        # Check world access
+        if not world_service.check_user_access(current_user.id, world_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this world"
+            )
+    
     agents, total_count, total_pages = agent_service.search_agents(
         query=query,
         include_inactive=include_inactive,
         zone_id=zone_id,
+        world_id=world_id,
         page=page,
         page_size=page_size
     )
@@ -238,7 +299,7 @@ async def update_agent(
             detail="Agent not found"
         )
     
-    # Check if agent is in a zone and user has owner access to the world
+    # Check if user has permission to update the agent
     if agent.zone_id:
         zone = zone_service.get_zone(agent.zone_id)
         if zone:
@@ -248,6 +309,20 @@ async def update_agent(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the world owner can update agents"
                 )
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can update agents"
+            )
+    else:
+        # If agent is not in any world or zone, default to admin-only
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can update unassigned agents"
+            )
     
     update_data = agent_update.dict(exclude_unset=True)
     
@@ -281,7 +356,7 @@ async def delete_agent(
             detail="Agent not found"
         )
     
-    # Check if agent is in a zone and user has owner access to the world
+    # Check if user has permission to delete the agent
     if agent.zone_id:
         zone = zone_service.get_zone(agent.zone_id)
         if zone:
@@ -291,6 +366,20 @@ async def delete_agent(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the world owner can delete agents"
                 )
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can delete agents"
+            )
+    else:
+        # If agent is not in any world or zone, default to admin-only
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can delete unassigned agents"
+            )
     
     success = agent_service.delete_agent(agent_id)
     if not success:
@@ -322,7 +411,7 @@ async def activate_agent(
             detail="Agent not found"
         )
     
-    # Check if agent is in a zone and user has owner access to the world
+    # Check if user has permission to activate the agent
     if agent.zone_id:
         zone = zone_service.get_zone(agent.zone_id)
         if zone:
@@ -332,6 +421,20 @@ async def activate_agent(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the world owner can activate agents"
                 )
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can activate agents"
+            )
+    else:
+        # If agent is not in any world or zone, default to admin-only
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can activate unassigned agents"
+            )
     
     agent = agent_service.activate_agent(agent_id)
     if not agent:
@@ -363,7 +466,7 @@ async def deactivate_agent(
             detail="Agent not found"
         )
     
-    # Check if agent is in a zone and user has owner access to the world
+    # Check if user has permission to deactivate the agent
     if agent.zone_id:
         zone = zone_service.get_zone(agent.zone_id)
         if zone:
@@ -373,6 +476,20 @@ async def deactivate_agent(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the world owner can deactivate agents"
                 )
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can deactivate agents"
+            )
+    else:
+        # If agent is not in any world or zone, default to admin-only
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can deactivate unassigned agents"
+            )
     
     agent = agent_service.deactivate_agent(agent_id)
     if not agent:
@@ -398,7 +515,7 @@ async def move_agent_to_zone(
     
     Checks that:
     1. The agent exists
-    2. The destination zone exists and has capacity
+    2. The destination zone exists and has capacity based on its tier
     3. The user has permission to move the agent
     """
     # Check if agent exists
@@ -430,9 +547,88 @@ async def move_agent_to_zone(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to move agent. The zone may have reached its entity limit."
+            detail=f"Failed to move agent. The zone may have reached its tier-based entity limit (tier {zone.tier})."
         )
     
     # Return the updated agent
     updated_agent = agent_service.get_agent(agent_id)
     return updated_agent
+
+
+@router.post("/{agent_id}/upgrade-tier", response_model=Dict[str, str])
+async def create_agent_tier_upgrade_checkout(
+    agent_id: str,
+    success_url: str = Query(..., description="URL to redirect after successful payment"),
+    cancel_url: str = Query(..., description="URL to redirect if payment is canceled"),
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_service(AgentService)),
+    zone_service: ZoneService = Depends(get_service(ZoneService)),
+    world_service: WorldService = Depends(get_service(WorldService)),
+    payment_service: PaymentService = Depends(get_service(PaymentService))
+):
+    """
+    Create a checkout session to upgrade an agent's tier
+    
+    Returns the checkout URL for processing payment
+    """
+    # Check if agent exists
+    agent = agent_service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found"
+        )
+    
+    # Check if user has permission to upgrade the agent
+    if agent.zone_id:
+        zone = zone_service.get_zone(agent.zone_id)
+        if zone:
+            world = world_service.get_world(zone.world_id)
+            if not world or world.owner_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only the world owner can upgrade agents"
+                )
+    elif agent.world_id:
+        world = world_service.get_world(agent.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can upgrade agents"
+            )
+    else:
+        # If agent is not in any world or zone, default to admin-only
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can upgrade unassigned agents"
+            )
+    
+    # Check if agent has an entity
+    if not agent.entity_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent cannot be upgraded (no associated entity)"
+        )
+    
+    try:
+        # Create checkout for entity tier upgrade
+        checkout_url = payment_service.create_entity_tier_upgrade_checkout(
+            user_id=current_user.id,
+            entity_id=agent.entity_id,
+            success_url=success_url,
+            cancel_url=cancel_url
+        )
+        
+        return {"checkout_url": checkout_url}
+    
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create checkout session"
+        )

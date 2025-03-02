@@ -143,6 +143,52 @@ class EntityService:
             page_size=page_size
         )
     
+    def create_entity(self, 
+                     name: str,
+                     description: Optional[str] = None,
+                     entity_type: EntityType = None,
+                     zone_id: Optional[str] = None,
+                     world_id: Optional[str] = None,
+                     properties: Optional[Dict[str, Any]] = None) -> Optional[Entity]:
+        """
+        Create a new entity
+        
+        Args:
+            name: The name of the entity
+            description: Optional description
+            entity_type: The type of entity (character, object, etc.)
+            zone_id: Optional zone ID to place the entity in
+            world_id: Optional world ID (should be set if zone_id is set)
+            properties: Optional JSON properties
+            
+        Returns:
+            The created entity or None if the zone has reached its limit
+        """
+        # If zone_id is provided, check if the zone has reached its entity limit
+        if zone_id:
+            # Use ZoneService to check capacity based on zone tier
+            from app.services.zone_service import ZoneService
+            zone_service = ZoneService(self.db)
+            if not zone_service.can_add_entity_to_zone(zone_id):
+                return None
+                
+        # Create the entity with tier 1 by default
+        entity = Entity(
+            name=name,
+            description=description,
+            type=entity_type,
+            zone_id=zone_id,
+            world_id=world_id,
+            properties=properties,
+            tier=1  # Default tier for new entities
+        )
+        
+        self.db.add(entity)
+        self.db.commit()
+        self.db.refresh(entity)
+        
+        return entity
+    
     def delete_entity(self, entity_id: str) -> bool:
         """Delete any entity by ID"""
         entity = self.get_entity(entity_id)
@@ -163,7 +209,7 @@ class EntityService:
             zone_id: ID of the destination zone
             
         Returns:
-            True if successful, False if zone has reached its entity limit
+            True if successful, False if zone has reached its tier-based entity limit
         """
         entity = self.get_entity(entity_id)
         zone = self.db.query(Zone).filter(Zone.id == zone_id).first()
@@ -175,13 +221,34 @@ class EntityService:
         if entity.zone_id == zone_id:
             return True
         
-        # Check if zone has reached its entity limit
-        zone_entity_count = self.db.query(func.count(Entity.id)).filter(Entity.zone_id == zone_id).scalar() or 0
-        if zone_entity_count >= zone.total_entity_limit:
+        # Check if zone has reached its entity limit based on tier
+        from app.services.zone_service import ZoneService
+        zone_service = ZoneService(self.db)
+        if not zone_service.can_add_entity_to_zone(zone_id):
             return False
         
         # Move the entity
         entity.zone_id = zone_id
+        self.db.commit()
+        
+        return True
+        
+    def upgrade_entity_tier(self, entity_id: str) -> bool:
+        """
+        Upgrade an entity's tier
+        
+        Args:
+            entity_id: ID of the entity to upgrade
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        entity = self.get_entity(entity_id)
+        if not entity:
+            return False
+            
+        # Increment tier
+        entity.tier += 1
         self.db.commit()
         
         return True

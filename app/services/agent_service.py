@@ -7,7 +7,6 @@ import math
 from app.models.agent import Agent
 from app.models.entity import EntityType
 from app.models.zone import Zone
-from app.services.entity_service import EntityService
 
 
 class AgentService:
@@ -15,13 +14,13 @@ class AgentService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.entity_service = EntityService(db)
     
     def create_agent(self, 
                     name: str, 
                     description: str = None, 
                     system_prompt: str = None, 
                     zone_id: Optional[str] = None,
+                    world_id: Optional[str] = None,
                     settings: Optional[Dict[str, Any]] = None) -> Optional[Agent]:
         """
         Create a new AI agent entity
@@ -31,31 +30,38 @@ class AgentService:
             description: Optional description
             system_prompt: Optional system prompt for AI behavior
             zone_id: Optional zone ID to place the agent in
+            world_id: Optional world ID for the agent
             settings: JSON settings for agent configuration
             
         Returns:
             The created agent or None if the zone has reached its entity limit
         """
-        # If zone_id is provided, check the zone's entity limit
-        if zone_id:
-            zone = self.db.query(Zone).filter(Zone.id == zone_id).first()
-            if not zone:
-                return None
-                
-            # Check entity limit
-            from app.services.zone_service import ZoneService
-            zone_service = ZoneService(self.db)
-            if not zone_service.can_add_entity_to_zone(zone_id):
-                return None
+        # First, create an entity
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(self.db)
         
+        entity = entity_service.create_entity(
+            name=name,
+            description=description,
+            entity_type=EntityType.AGENT,
+            zone_id=zone_id,
+            world_id=world_id
+        )
+        
+        if not entity:
+            return None  # Failed to create entity (e.g., zone reached limit)
+        
+        # Create agent with default tier 1
         agent = Agent(
             name=name,
             description=description,
-            type=EntityType.AGENT,
             system_prompt=system_prompt,
             is_active=True,
             zone_id=zone_id,
-            settings=settings
+            world_id=world_id,
+            entity_id=entity.id,
+            settings=settings,
+            tier=1  # Default tier for new agents
         )
         
         self.db.add(agent)
@@ -87,31 +93,51 @@ class AgentService:
         Returns:
             Tuple of (agents, total_count, total_pages)
         """
-        # Start with entity type filter
-        if filters is None:
-            filters = {}
-        filters['type'] = EntityType.AGENT
+        query = self.db.query(Agent)
         
-        # Get entities with basic filters
-        entities, total_count, total_pages = self.entity_service.get_entities(
-            filters=filters,
-            page=page,
-            page_size=page_size,
-            sort_by=sort_by,
-            sort_desc=sort_desc
-        )
+        # Apply filters if provided
+        if filters:
+            if 'zone_id' in filters:
+                query = query.filter(Agent.zone_id == filters['zone_id'])
+                
+            if 'world_id' in filters:
+                query = query.filter(Agent.world_id == filters['world_id'])
+            
+            if 'name' in filters:
+                query = query.filter(Agent.name.ilike(f"%{filters['name']}%"))
+            
+            if 'description' in filters:
+                query = query.filter(Agent.description.ilike(f"%{filters['description']}%"))
+            
+            if 'is_active' in filters:
+                query = query.filter(Agent.is_active == filters['is_active'])
+                
+            if 'search' in filters and filters['search']:
+                search_term = f"%{filters['search']}%"
+                query = query.filter(
+                    or_(
+                        Agent.name.ilike(search_term),
+                        Agent.description.ilike(search_term)
+                    )
+                )
         
-        # Convert entities to agents
-        agents = [entity for entity in entities if isinstance(entity, Agent)]
+        # Get total count before pagination
+        total_count = query.count()
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Apply agent-specific filters client-side
-        if 'is_active' in filters:
-            agents = [agent for agent in agents if agent.is_active == filters['is_active']]
+        # Apply sorting
+        if hasattr(Agent, sort_by):
+            sort_field = getattr(Agent, sort_by)
+            query = query.order_by(sort_field.desc() if sort_desc else sort_field)
+        else:
+            # Default to name
+            query = query.order_by(Agent.name.desc() if sort_desc else Agent.name)
         
-        # Recalculate counts if we filtered further
-        if 'is_active' in filters:
-            total_count = len(agents)
-            total_pages = (total_count + page_size - 1) // page_size
+        # Apply pagination - convert page to offset
+        offset = (page - 1) * page_size if page > 0 else 0
+        
+        # Get paginated results
+        agents = query.offset(offset).limit(page_size).all()
         
         return agents, total_count, total_pages
     
@@ -129,24 +155,66 @@ class AgentService:
         if not agent:
             return None
         
-        # Update only the fields provided
+        # If we're updating basic properties, update the entity as well
+        entity = None
+        entity_updates = {}
+        if agent.entity_id:
+            from app.models.entity import Entity
+            entity = self.db.query(Entity).filter(Entity.id == agent.entity_id).first()
+            
+            if entity:
+                # Collect entity updates
+                if 'name' in update_data:
+                    entity_updates['name'] = update_data['name']
+                if 'description' in update_data:
+                    entity_updates['description'] = update_data['description']
+                
+                # Apply entity updates
+                for key, value in entity_updates.items():
+                    setattr(entity, key, value)
+        
+        # Update agent fields
         for key, value in update_data.items():
             if hasattr(agent, key):
                 setattr(agent, key, value)
         
         self.db.commit()
-        self.db.refresh(agent)
+        
+        if agent:
+            self.db.refresh(agent)
+        if entity:
+            self.db.refresh(entity)
         
         return agent
     
     def delete_agent(self, agent_id: str) -> bool:
-        """Delete an agent"""
-        return self.entity_service.delete_entity(agent_id)
+        """Delete an agent and its associated entity"""
+        agent = self.get_agent(agent_id)
+        if not agent:
+            return False
+        
+        # Get the associated entity
+        entity_id = agent.entity_id
+        
+        # Delete the agent
+        self.db.delete(agent)
+        self.db.commit()
+        
+        # Delete the associated entity if it exists
+        if entity_id:
+            from app.models.entity import Entity
+            entity = self.db.query(Entity).filter(Entity.id == entity_id).first()
+            if entity:
+                self.db.delete(entity)
+                self.db.commit()
+        
+        return True
     
     def search_agents(self, 
                      query: str, 
                      include_inactive: bool = False,
                      zone_id: Optional[str] = None,
+                     world_id: Optional[str] = None,
                      page: int = 1, 
                      page_size: int = 20) -> Tuple[List[Agent], int, int]:
         """
@@ -156,30 +224,29 @@ class AgentService:
             query: Search term
             include_inactive: Whether to include inactive agents
             zone_id: Optional zone ID to search within
+            world_id: Optional world ID to search within
             page: Page number
             page_size: Results per page
         """
-        # Start with entity search
-        entities, total_count, total_pages = self.entity_service.search_entities(
-            query=query,
-            zone_id=zone_id,
-            entity_type=EntityType.AGENT,
+        # Start with basic search filter
+        filters = {'search': query}
+        
+        # Add optional filters
+        if zone_id:
+            filters['zone_id'] = zone_id
+            
+        if world_id:
+            filters['world_id'] = world_id
+            
+        # Apply active filter if needed
+        if not include_inactive:
+            filters['is_active'] = True
+        
+        return self.get_agents(
+            filters=filters,
             page=page,
             page_size=page_size
         )
-        
-        # Convert entities to agents
-        agents = [entity for entity in entities if isinstance(entity, Agent)]
-        
-        # Filter by active status if needed
-        if not include_inactive:
-            agents = [agent for agent in agents if agent.is_active]
-            
-            # Recalculate counts if we filtered further
-            total_count = len(agents)
-            total_pages = (total_count + page_size - 1) // page_size
-        
-        return agents, total_count, total_pages
     
     def count_agents(self, include_inactive: bool = False) -> int:
         """
@@ -214,4 +281,44 @@ class AgentService:
         Returns:
             True if successful, False if the zone has reached its entity limit
         """
-        return self.entity_service.move_entity_to_zone(agent_id, zone_id)
+        agent = self.get_agent(agent_id)
+        if not agent or not agent.entity_id:
+            return False
+            
+        # Use EntityService to move the underlying entity
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(self.db)
+        
+        if entity_service.move_entity_to_zone(agent.entity_id, zone_id):
+            # Update the agent's zone_id to match
+            agent.zone_id = zone_id
+            self.db.commit()
+            return True
+        
+        return False
+        
+    def upgrade_agent_tier(self, agent_id: str) -> bool:
+        """
+        Upgrade an agent's tier
+        
+        Args:
+            agent_id: ID of the agent to upgrade
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        agent = self.get_agent(agent_id)
+        if not agent:
+            return False
+            
+        # Increment tier
+        agent.tier += 1
+        self.db.commit()
+        
+        # Also upgrade the entity if present
+        if agent.entity_id:
+            from app.services.entity_service import EntityService
+            entity_service = EntityService(self.db)
+            entity_service.upgrade_entity_tier(agent.entity_id)
+        
+        return True

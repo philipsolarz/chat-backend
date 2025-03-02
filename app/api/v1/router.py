@@ -1,13 +1,13 @@
 # app/api/v1/router.py
 from fastapi import APIRouter
-from app.api.v1 import users, characters, agents, conversations, messages, auth, payments, usage, worlds, zones, entities, objects
+from app.api.v1 import players, characters, agents, conversations, messages, auth, payments, usage, worlds, zones, entities, objects
 
 # Create the main router
 api_router = APIRouter()
 
 # Include all the sub-routers
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(players.router, prefix="/users", tags=["users"])
 api_router.include_router(worlds.router, prefix="/worlds", tags=["worlds"])
 api_router.include_router(zones.router, prefix="/zones", tags=["zones"])
 api_router.include_router(entities.router, prefix="/entities", tags=["entities"])
