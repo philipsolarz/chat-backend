@@ -19,7 +19,9 @@ class WorldService:
                     name: str, 
                     description: Optional[str] = None,
                     settings: Optional[Dict[str, Any]] = None,
-                    tier: int = 1) -> World:
+                    tier: int = 1,
+                    is_official: bool = False,
+                    is_private: bool = False) -> World:
         """
         Create a new world
         
@@ -29,13 +31,17 @@ class WorldService:
             description: Description of the world
             settings: JSON settings for world configuration
             tier: Initial tier level (defaults to 1)
+            is_official: Whether this is an official world (defaults to False)
+            is_private: Whether this world is private (defaults to False)
         """
         world = World(
             name=name,
             description=description,
-            settings=settings,
+            properties=settings,
             owner_id=owner_id,
-            tier=tier
+            tier=tier,
+            is_official=is_official,
+            is_private=is_private
         )
         
         self.db.add(world)
@@ -82,6 +88,12 @@ class WorldService:
 
             if 'tier' in filters:
                 query = query.filter(World.tier == filters['tier'])
+                
+            if 'is_official' in filters:
+                query = query.filter(World.is_official == filters['is_official'])
+                
+            if 'is_private' in filters:
+                query = query.filter(World.is_private == filters['is_private'])
                 
             if 'search' in filters and filters['search']:
                 search_term = f"%{filters['search']}%"
@@ -147,7 +159,7 @@ class WorldService:
         return True
     
     def check_user_access(self, user_id: str, world_id: str) -> bool:
-        """Check if a user has access to a world (owner or admin)"""
+        """Check if a user has access to a world (owner, admin, or public non-private world)"""
         world = self.get_world(world_id)
         
         if not world:
@@ -162,13 +174,19 @@ class WorldService:
         if user and user.is_admin:
             return True
             
-        return False
+        # If world is private, only owner or admin has access (already checked above)
+        if world.is_private:
+            return False
+            
+        # If world is not private, it's accessible to all users
+        return True
     
     def search_worlds(self, 
                      query: str, 
                      user_id: Optional[str] = None, 
                      page: int = 1, 
-                     page_size: int = 20) -> Tuple[List[World], int, int]:
+                     page_size: int = 20,
+                     include_private: bool = False) -> Tuple[List[World], int, int]:
         """
         Search for worlds by name or description
         
@@ -177,11 +195,15 @@ class WorldService:
             user_id: Filter by user ID (for owned worlds)
             page: Page number
             page_size: Results per page
+            include_private: Whether to include private worlds
         """
         filters = {'search': query}
         
         if user_id:
             filters['owner_id'] = user_id
+            
+        if not include_private:
+            filters['is_private'] = False
         
         return self.get_worlds(
             filters=filters,

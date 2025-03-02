@@ -352,21 +352,27 @@ def seed_worlds(db: Session):
             description="A magical world filled with fantasy creatures and landscapes",
             properties={"theme": "medieval", "magic_level": "high", "genre": "Fantasy"},
             tier=1,
-            owner_id=admin.id
+            owner_id=admin.id,
+            is_official=True,  # Mark as official
+            is_private=False   # Make it public
         ),
         World(
             name="Sci-Fi Universe",
             description="A futuristic universe with advanced technology and space exploration",
             properties={"theme": "futuristic", "technology_level": "advanced", "genre": "Science Fiction", "space_travel": True},
             tier=2,
-            owner_id=admin.id
+            owner_id=admin.id,
+            is_official=True,  # Mark as official
+            is_private=False   # Make it public
         ),
         World(
             name="Post-Apocalyptic Wasteland",
             description="A harsh world devastated by nuclear war and environmental collapse",
             properties={"theme": "wasteland", "radiation_level": "high", "genre": "Post-Apocalyptic", "survival_difficulty": "extreme"},
             tier=1,
-            owner_id=admin.id
+            owner_id=admin.id,
+            is_official=True,  # Mark as official
+            is_private=False   # Make it public
         )
     ]
     
