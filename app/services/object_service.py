@@ -22,8 +22,6 @@ class ObjectService:
                      description: Optional[str] = None,
                      zone_id: Optional[str] = None,
                      world_id: Optional[str] = None,
-                     is_interactive: bool = False,
-                     object_type: Optional[str] = None,
                      settings: Optional[Dict[str, Any]] = None) -> Optional[Object]:
         """
         Create a new object entity
@@ -56,8 +54,7 @@ class ObjectService:
         obj = Object(
             name=name,
             description=description,
-            type=ObjectType.GENERIC if not object_type else object_type,
-            is_interactive=is_interactive,
+            type=ObjectType.GENERIC,
             zone_id=zone_id,
             world_id=world_id,
             entity_id=entity.id,
@@ -109,13 +106,7 @@ class ObjectService:
             
             if 'description' in filters:
                 query = query.filter(Object.description.ilike(f"%{filters['description']}%"))
-            
-            if 'is_interactive' in filters:
-                query = query.filter(Object.is_interactive == filters['is_interactive'])
-                
-            if 'object_type' in filters:
-                query = query.filter(Object.type == filters['object_type'])
-                
+
             if 'search' in filters and filters['search']:
                 search_term = f"%{filters['search']}%"
                 query = query.filter(
@@ -205,8 +196,6 @@ class ObjectService:
                       query: str, 
                       zone_id: Optional[str] = None,
                       world_id: Optional[str] = None,
-                      is_interactive: Optional[bool] = None,
-                      object_type: Optional[str] = None,
                       page: int = 1, 
                       page_size: int = 20) -> Tuple[List[Object], int, int]:
         """
@@ -216,8 +205,6 @@ class ObjectService:
             query: Search term
             zone_id: Optional zone ID to search within
             world_id: Optional world ID to search within
-            is_interactive: Optional filter for interactive objects
-            object_type: Optional filter for object type
             page: Page number
             page_size: Results per page
             
@@ -233,13 +220,7 @@ class ObjectService:
             
         if world_id:
             filters['world_id'] = world_id
-            
-        if is_interactive is not None:
-            filters['is_interactive'] = is_interactive
-            
-        if object_type:
-            filters['object_type'] = object_type
-        
+
         return self.get_objects(
             filters=filters,
             page=page,

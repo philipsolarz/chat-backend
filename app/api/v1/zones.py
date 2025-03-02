@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import ZoneBase, ZoneCreate, ZoneDetailResponse, ZoneEventsRequest, ZoneHierarchyResponse, ZoneList, ZoneResponse, ZoneTreeNode, ZoneUpdate
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.services.zone_service import ZoneService
@@ -17,9 +17,9 @@ from app.models.zone import Zone
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.ZoneResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ZoneResponse, status_code=status.HTTP_201_CREATED)
 async def create_zone(
-    zone: schemas.ZoneCreate,
+    zone: ZoneCreate,
     current_user: User = Depends(get_current_user),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
     world_service: WorldService = Depends(get_service(WorldService))
@@ -73,7 +73,7 @@ async def create_zone(
     return new_zone
 
 
-@router.get("/", response_model=schemas.ZoneList)
+@router.get("/", response_model=ZoneList)
 async def list_zones(
     world_id: str = Query(..., description="ID of the world to list zones for"),
     parent_zone_id: Optional[str] = Query(None, description="ID of the parent zone to list sub-zones for"),
@@ -132,7 +132,7 @@ async def list_zones(
     }
 
 
-@router.get("/hierarchy", response_model=schemas.ZoneHierarchyResponse)
+@router.get("/hierarchy", response_model=ZoneHierarchyResponse)
 async def get_zone_hierarchy(
     world_id: str = Query(..., description="ID of the world to get zone hierarchy for"),
     current_user: User = Depends(get_current_user),
@@ -173,7 +173,7 @@ async def get_zone_hierarchy(
     top_level_zones = parent_to_children.get(None, [])
     
     def build_tree(zone):
-        node = schemas.ZoneTreeNode(
+        node = ZoneTreeNode(
             id=zone.id,
             name=zone.name,
             description=zone.description,
@@ -198,7 +198,7 @@ async def get_zone_hierarchy(
     return {"zones": result}
 
 
-@router.get("/{zone_id}", response_model=schemas.ZoneDetailResponse)
+@router.get("/{zone_id}", response_model=ZoneDetailResponse)
 async def get_zone(
     zone_id: str = Path(..., title="The ID of the zone to get"),
     current_user: User = Depends(get_current_user),
@@ -245,10 +245,10 @@ async def get_zone(
     return response
 
 
-@router.put("/{zone_id}", response_model=schemas.ZoneResponse)
+@router.put("/{zone_id}", response_model=ZoneResponse)
 async def update_zone(
     zone_id: str,
-    zone_update: schemas.ZoneUpdate,
+    zone_update: ZoneUpdate,
     current_user: User = Depends(get_current_user),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
     world_service: WorldService = Depends(get_service(WorldService))

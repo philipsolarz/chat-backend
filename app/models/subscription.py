@@ -48,7 +48,7 @@ class UserSubscription(Base, TimestampMixin):
     __tablename__ = "user_subscriptions"
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
     plan_id = Column(String(36), ForeignKey("subscription_plans.id"), nullable=False)
     
     # Stripe information
@@ -67,11 +67,11 @@ class UserSubscription(Base, TimestampMixin):
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Relationships
-    user = relationship("User", back_populates="subscriptions")
+    player = relationship("Player", back_populates="subscriptions")
     plan = relationship("SubscriptionPlan", back_populates="subscriptions")
     
     def __repr__(self):
-        return f"<UserSubscription {self.id} - User: {self.user_id} - Plan: {self.plan.name if self.plan else None}>"
+        return f"<UserSubscription {self.id} - Player: {self.user_id} - Plan: {self.plan.name if self.plan else None}>"
     
     @property
     def is_valid(self):

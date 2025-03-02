@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import MessageBase, MessageCreate, MessageDetailResponse, MessageEventCreate, MessageList, MessageResponse
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service, get_conversation_access
 from app.api.premium import check_message_limit
@@ -21,12 +21,12 @@ router = APIRouter()
 
 @router.post(
     "/conversations/{conversation_id}",
-    response_model=schemas.MessageDetailResponse,
+    response_model=MessageDetailResponse,
     status_code=status.HTTP_201_CREATED
 )
 async def create_message(
     conversation_id: str,
-    message_data: schemas.MessageCreate,
+    message_data: MessageCreate,
     background_tasks: BackgroundTasks,
     user_with_capacity: User = Depends(check_message_limit),  # Check message limits
     conversation_service: ConversationService = Depends(get_service(ConversationService)),
@@ -102,7 +102,7 @@ async def create_message(
 
 @router.get(
     "/conversations/{conversation_id}",
-    response_model=schemas.MessageList
+    response_model=MessageList
 )
 async def list_conversation_messages(
     conversation_id: str,
@@ -152,7 +152,7 @@ async def list_conversation_messages(
 
 @router.get(
     "/conversations/{conversation_id}/recent",
-    response_model=List[schemas.MessageDetailResponse]
+    response_model=List[MessageDetailResponse]
 )
 async def get_recent_messages(
     conversation_id: str,
@@ -189,7 +189,7 @@ async def get_recent_messages(
 
 @router.get(
     "/search/",
-    response_model=schemas.MessageList
+    response_model=MessageList
 )
 async def search_messages(
     conversation_id: str,

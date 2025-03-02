@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import EntityBase, EntityList, EntityResponse, EntityType
 from app.api.auth import get_current_user
 from app.api.dependencies import check_entity_ownership, get_service
 from app.services.entity_service import EntityService
@@ -16,7 +16,7 @@ from app.models.entity import Entity, EntityType
 router = APIRouter()
 
 
-@router.get("/", response_model=schemas.EntityList)
+@router.get("/", response_model=EntityList)
 async def list_entities(
     zone_id: Optional[str] = Query(None, description="Filter entities by zone"),
     world_id: Optional[str] = Query(None, description="Filter entities by world"),
@@ -108,7 +108,7 @@ async def list_entities(
     }
 
 
-@router.get("/{entity_id}", response_model=schemas.EntityResponse)
+@router.get("/{entity_id}", response_model=EntityResponse)
 async def get_entity(
     entity_id: str = Path(..., title="The ID of the entity to retrieve"),
     current_user: User = Depends(get_current_user),
@@ -144,7 +144,7 @@ async def get_entity(
     return entity
 
 
-@router.post("/{entity_id}/move", response_model=schemas.EntityResponse)
+@router.post("/{entity_id}/move", response_model=EntityResponse)
 async def move_entity_to_zone(
     entity_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),
@@ -181,7 +181,7 @@ async def move_entity_to_zone(
     return updated_entity
 
 
-@router.post("/{entity_id}/upgrade-tier", response_model=schemas.EntityResponse)
+@router.post("/{entity_id}/upgrade-tier", response_model=EntityResponse)
 async def upgrade_entity_tier(
     entity_id: str,
     entity: Entity = Depends(check_entity_ownership),  # Use new dependency
@@ -273,7 +273,7 @@ async def delete_entity(
     return None
 
 
-@router.get("/search/", response_model=schemas.EntityList)
+@router.get("/search/", response_model=EntityList)
 async def search_entities(
     query: str = Query(..., min_length=1, description="Search term"),
     zone_id: Optional[str] = Query(None, description="Filter search to specific zone"),

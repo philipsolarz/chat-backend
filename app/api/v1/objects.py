@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import ObjectBase, ObjectCreate, ObjectList, ObjectResponse, ObjectType, ObjectUpdate
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.services.object_service import ObjectService
@@ -17,9 +17,9 @@ from app.models.object import Object, ObjectType
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.ObjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ObjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_object(
-    object_data: schemas.ObjectCreate,
+    object_data: ObjectCreate,
     current_user: User = Depends(get_current_user),
     object_service: ObjectService = Depends(get_service(ObjectService)),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
@@ -102,7 +102,7 @@ async def create_object(
     return new_object
 
 
-@router.get("/", response_model=schemas.ObjectList)
+@router.get("/", response_model=ObjectList)
 async def list_objects(
     zone_id: Optional[str] = Query(None, description="Filter objects by zone"),
     world_id: Optional[str] = Query(None, description="Filter objects by world"),
@@ -191,7 +191,7 @@ async def list_objects(
     }
 
 
-@router.get("/{object_id}", response_model=schemas.ObjectResponse)
+@router.get("/{object_id}", response_model=ObjectResponse)
 async def get_object(
     object_id: str = Path(..., title="The ID of the object to retrieve"),
     current_user: User = Depends(get_current_user),
@@ -227,10 +227,10 @@ async def get_object(
     return obj
 
 
-@router.put("/{object_id}", response_model=schemas.ObjectResponse)
+@router.put("/{object_id}", response_model=ObjectResponse)
 async def update_object(
     object_id: str,
-    object_update: schemas.ObjectUpdate,
+    object_update: ObjectUpdate,
     current_user: User = Depends(get_current_user),
     object_service: ObjectService = Depends(get_service(ObjectService)),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
@@ -340,7 +340,7 @@ async def delete_object(
     return None
 
 
-@router.post("/{object_id}/move", response_model=schemas.ObjectResponse)
+@router.post("/{object_id}/move", response_model=ObjectResponse)
 async def move_object_to_zone(
     object_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),
@@ -401,7 +401,7 @@ async def move_object_to_zone(
     return updated_object
 
 
-@router.get("/search/", response_model=schemas.ObjectList)
+@router.get("/search/", response_model=ObjectList)
 async def search_objects(
     query: str = Query(..., min_length=1, description="Search term"),
     zone_id: Optional[str] = Query(None, description="Filter search to specific zone"),

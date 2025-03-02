@@ -22,22 +22,22 @@ class Agent(Base, TimestampMixin):
     
     tier = Column(Integer, default=1)
     
-    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
-    entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    # entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
     character_id = Column(String(36), ForeignKey("characters.id"), nullable=True)
 
-    world = relationship("World", back_populates="characters")
-    zone = relationship("Zone", back_populates="characters")
-    entity = relationship("Entity", back_populates="characters")
+    # world = relationship("World", back_populates="agents")
+    # zone = relationship("Zone", back_populates="agents")
+    # entity = relationship("Entity", back_populates="agents")
     character = relationship("Character", back_populates="agent")
 
     # Relationships - agent participations in conversations
-    # conversation_participations = relationship(
-    #     "ConversationParticipant",
-    #     back_populates="agent",
-    #     cascade="all, delete-orphan"
-    # )
+    conversation_participations = relationship(
+        "ConversationParticipant",
+        back_populates="agent",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Agent {self.id} - {self.name}>"

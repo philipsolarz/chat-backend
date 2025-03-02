@@ -30,23 +30,23 @@ class Entity(Base, TimestampMixin):
     properties = Column(JSON, nullable=True)
     
     # Foreign keys
-    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
     zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
-    
-    # Discriminator column for inheritance
-    # __mapper_args__ = {
-    #     'polymorphic_on': type,
-    #     'polymorphic_identity': None
-    # }
-    
+    # character_id = Column(String(36), ForeignKey("characters.id"), nullable=True)
+    # object_id = Column(String(36), ForeignKey("objects.id"), nullable=True)
+
+    # agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
+    # player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
+
     # Relationships
     zone = relationship("Zone", back_populates="entities")
-    world = relationship("World", back_populates="entities")
+    # world = relationship("World", back_populates="entities")
 
     character = relationship("Character", back_populates="entity")
-    object = relationship("Object", back_populates="object")
-    agent = relationship("Agent", back_populates="agent")
-    player = relationship("Player", back_populates="player")
+    object = relationship("Object", back_populates="entity")
+
+    # agent = relationship("Agent", back_populates="entity")
+    # player = relationship("Player", back_populates="entity")
 
     targeted_events = relationship("GameEvent", foreign_keys="GameEvent.target_entity_id", back_populates="target_entity")
     

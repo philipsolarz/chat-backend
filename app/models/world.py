@@ -28,11 +28,11 @@ class World(Base, TimestampMixin):
     owner = relationship("Player", back_populates="owned_worlds", foreign_keys=[owner_id])
 
     zones = relationship("Zone", back_populates="world", cascade="all, delete-orphan")
-    entities = relationship("Entity", back_populates="world")
-    characters = relationship("Character", back_populates="world")
-    objects = relationship("Object", back_populates="world")
-    agents = relationship("Agent", back_populates="world")
-    players = relationship("Player", back_populates="world")
+    # entities = relationship("Entity", back_populates="world")
+    # characters = relationship("Character", back_populates="world")
+    # objects = relationship("Object", back_populates="world")
+    # agents = relationship("Agent", back_populates="world")
+    # players = relationship("Player", back_populates="world")
 
     events = relationship("GameEvent", back_populates="world", cascade="all, delete-orphan")
 

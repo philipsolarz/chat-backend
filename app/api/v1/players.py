@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import PlayerBase, PlayerCreate, PlayerResponse, PlayerUpdate, WorldList, CharacterList
 from app.api.auth import get_current_user
 from app.services.player_service import PlayerService  # Updated import
 from app.api.dependencies import get_service
@@ -12,7 +12,7 @@ from app.models.player import Player  # Keep as User for now for compatibility
 router = APIRouter()
 
 
-@router.get("/me", response_model=schemas.PlayerResponse)  # Updated schema name
+@router.get("/me", response_model=PlayerResponse)  # Updated schema name
 async def get_current_player_info(
     current_user: Player = Depends(get_current_user)
 ):
@@ -24,9 +24,9 @@ async def get_current_player_info(
     return current_user
 
 
-@router.put("/me", response_model=schemas.PlayerResponse)  # Updated schema name
+@router.put("/me", response_model=PlayerResponse)  # Updated schema name
 async def update_player_info(
-    player_update: schemas.PlayerUpdate,  # Updated schema name
+    player_update: PlayerUpdate,  # Updated schema name
     current_user: Player = Depends(get_current_user),
     player_service: PlayerService = Depends(get_service(PlayerService))
 ):
@@ -92,7 +92,7 @@ async def get_player_stats(
     return stats
 
 
-@router.get("/me/worlds", response_model=schemas.WorldList)
+@router.get("/me/worlds", response_model=WorldList)
 async def get_player_worlds(
     current_user: Player = Depends(get_current_user),
     world_service = Depends(get_service("WorldService"))  # Inject WorldService dynamically
@@ -118,7 +118,7 @@ async def get_player_worlds(
     }
 
 
-@router.get("/me/characters", response_model=schemas.CharacterList)
+@router.get("/me/characters", response_model=CharacterList)
 async def get_player_characters(
     current_user: Player = Depends(get_current_user),
     character_service = Depends(get_service("CharacterService"))  # Inject CharacterService dynamically

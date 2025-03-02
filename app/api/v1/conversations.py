@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import ConversationBase, ConversationCreate, ConversationDetailResponse, ConversationResponse, ConversationSummary, ConversationSummaryResponse, ConversationUpdate, ConversationList, ParticipantAddRequest, ParticipantDetailResponse, ParticipantResponse
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service, get_conversation_access
 from app.api.premium import check_conversation_limit
@@ -18,9 +18,9 @@ from app.models.conversation import Conversation
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.ConversationDetailResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ConversationDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
-    conversation_data: schemas.ConversationCreate,
+    conversation_data: ConversationCreate,
     user_with_capacity: User = Depends(check_conversation_limit),  # Check conversation limits
     conversation_service: ConversationService = Depends(get_service(ConversationService)),
     character_service: CharacterService = Depends(get_service(CharacterService)),
@@ -117,7 +117,7 @@ async def create_conversation(
     }
 
 
-@router.get("/", response_model=schemas.ConversationList)
+@router.get("/", response_model=ConversationList)
 async def list_conversations(
     title: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -149,7 +149,7 @@ async def list_conversations(
     }
 
 
-@router.get("/recent", response_model=List[schemas.ConversationSummaryResponse])
+@router.get("/recent", response_model=List[ConversationSummaryResponse])
 async def get_recent_conversations(
     limit: int = Query(10, ge=1, le=50),
     current_user: User = Depends(get_current_user),
@@ -163,7 +163,7 @@ async def get_recent_conversations(
     return conversation_service.get_recent_conversations(current_user.id, limit)
 
 
-@router.get("/{conversation_id}", response_model=schemas.ConversationDetailResponse)
+@router.get("/{conversation_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conversation: Conversation = Depends(get_conversation_access)
 ):
@@ -182,9 +182,9 @@ async def get_conversation(
     }
 
 
-@router.put("/{conversation_id}", response_model=schemas.ConversationResponse)
+@router.put("/{conversation_id}", response_model=ConversationResponse)
 async def update_conversation(
-    conversation_update: schemas.ConversationUpdate,
+    conversation_update: ConversationUpdate,
     conversation: Conversation = Depends(get_conversation_access),
     conversation_service: ConversationService = Depends(get_service(ConversationService))
 ):
@@ -226,10 +226,10 @@ async def delete_conversation(
     return None
 
 
-@router.post("/{conversation_id}/participants", response_model=schemas.ParticipantDetailResponse)
+@router.post("/{conversation_id}/participants", response_model=ParticipantDetailResponse)
 async def add_participant(
     conversation_id: str,
-    participant: schemas.ParticipantAddRequest,
+    participant: ParticipantAddRequest,
     current_user: User = Depends(get_current_user),
     conversation_service: ConversationService = Depends(get_service(ConversationService)),
     character_service: CharacterService = Depends(get_service(CharacterService)),
@@ -366,7 +366,7 @@ async def remove_participant(
     return None
 
 
-@router.get("/search/", response_model=schemas.ConversationList)
+@router.get("/search/", response_model=ConversationList)
 async def search_conversations(
     query: str = Query(..., min_length=1),
     page: int = Query(1, ge=1),

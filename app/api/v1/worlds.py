@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import WorldList, WorldBase, WorldCreate, WorldResponse, WorldUpdate
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.services.world_service import WorldService
@@ -15,9 +15,9 @@ from app.models.world import World
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.WorldResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=WorldResponse, status_code=status.HTTP_201_CREATED)
 async def create_world(
-    world: schemas.WorldCreate,
+    world: WorldCreate,
     current_user: User = Depends(get_current_user),
     world_service: WorldService = Depends(get_service(WorldService))
 ):
@@ -31,15 +31,13 @@ async def create_world(
         owner_id=current_user.id,
         name=world.name,
         description=world.description,
-        settings=world.settings,
-        genre=world.genre if hasattr(world, 'genre') else None
+        settings=world.settings
     )
 
 
-@router.get("/", response_model=schemas.WorldList)
+@router.get("/", response_model=WorldList)
 async def list_worlds(
     name: Optional[str] = None,
-    genre: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("name"),
@@ -53,13 +51,10 @@ async def list_worlds(
     Returns a paginated list of worlds
     """
     filters = {'owner_id': current_user.id}
-    
+    # filters = {}
     if name:
         filters['name'] = name
-    
-    if genre:
-        filters['genre'] = genre
-    
+
     worlds, total_count, total_pages = world_service.get_worlds(
         filters=filters,
         page=page,
@@ -77,7 +72,7 @@ async def list_worlds(
     }
 
 
-@router.get("/{world_id}", response_model=schemas.WorldResponse)
+@router.get("/{world_id}", response_model=WorldResponse)
 async def get_world(
     world_id: str = Path(..., title="The ID of the world to get"),
     current_user: User = Depends(get_current_user),
@@ -106,10 +101,10 @@ async def get_world(
     return world
 
 
-@router.put("/{world_id}", response_model=schemas.WorldResponse)
+@router.put("/{world_id}", response_model=WorldResponse)
 async def update_world(
     world_id: str,
-    world_update: schemas.WorldUpdate,
+    world_update: WorldUpdate,
     current_user: User = Depends(get_current_user),
     world_service: WorldService = Depends(get_service(WorldService))
 ):
@@ -181,7 +176,7 @@ async def delete_world(
     return None
 
 
-@router.get("/search/", response_model=schemas.WorldList)
+@router.get("/search/", response_model=WorldList)
 async def search_worlds(
     query: str = Query(..., min_length=1),
     page: int = Query(1, ge=1),

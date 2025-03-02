@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_access_token, get_current_user
 from app.database import get_db
-from app.api import schemas
+from app.schemas import TokenResponse, SignInRequest, SignUpRequest, RefreshTokenRequest, ResendVerificationRequest
 from app.models.player import Player
 from app.services.auth_service import AuthService
 from app.api.dependencies import get_service
@@ -14,9 +14,9 @@ from app.api.dependencies import get_service
 router = APIRouter()
 
 
-@router.post("/register", response_model=schemas.TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
-    request: schemas.SignUpRequest,
+    request: SignUpRequest,
     auth_service: AuthService = Depends(get_service(AuthService))
 ):
     """
@@ -47,9 +47,9 @@ async def register_user(
         )
 
 
-@router.post("/login", response_model=schemas.TokenResponse)
+@router.post("/login", response_model=TokenResponse)
 async def login_user(
-    request: schemas.SignInRequest,
+    request: SignInRequest,
     auth_service: AuthService = Depends(get_service(AuthService))
 ):
     """
@@ -73,9 +73,9 @@ async def login_user(
         )
 
 
-@router.post("/refresh", response_model=schemas.TokenResponse)
+@router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: schemas.RefreshTokenRequest,
+    request: RefreshTokenRequest,
     auth_service: AuthService = Depends(get_service(AuthService))
 ):
     """
@@ -150,7 +150,7 @@ async def verify_email(
 
 @router.post("/resend-verification", status_code=status.HTTP_200_OK)
 async def resend_verification_email(
-    request_data: schemas.ResendVerificationRequest,
+    request_data: ResendVerificationRequest,
     auth_service: AuthService = Depends(get_service(AuthService))
 ):
     """

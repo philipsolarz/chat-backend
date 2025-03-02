@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from app.database import get_db
-from app.api import schemas
+from app.schemas import AgentBase, AgentCreate, AgentResponse, AgentUpdate, AgentList
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.services.agent_service import AgentService
@@ -17,9 +17,9 @@ from app.models.agent import Agent
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.AgentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
-    agent: schemas.AgentCreate,
+    agent: AgentCreate,
     current_user: User = Depends(get_current_user),
     agent_service: AgentService = Depends(get_service(AgentService)),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
@@ -75,7 +75,6 @@ async def create_agent(
     new_agent = agent_service.create_agent(
         name=agent.name,
         description=agent.description,
-        system_prompt=agent.system_prompt,
         zone_id=agent.zone_id,
         world_id=agent.world_id,
         settings=agent.settings
@@ -90,9 +89,8 @@ async def create_agent(
     return new_agent
 
 
-@router.get("/", response_model=schemas.AgentList)
+@router.get("/", response_model=AgentList)
 async def list_agents(
-    is_active: Optional[bool] = None,
     zone_id: Optional[str] = Query(None, description="Filter agents by zone"),
     world_id: Optional[str] = Query(None, description="Filter agents by world"),
     name: Optional[str] = None,
@@ -111,10 +109,7 @@ async def list_agents(
     Returns a paginated list of agents
     """
     filters = {}
-    
-    if is_active is not None:
-        filters['is_active'] = is_active
-    
+
     if name:
         filters['name'] = name
     
@@ -171,7 +166,7 @@ async def list_agents(
     }
 
 
-@router.get("/{agent_id}", response_model=schemas.AgentResponse)
+@router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str = Path(..., title="The ID of the agent to get"),
     current_user: User = Depends(get_current_user),
@@ -210,10 +205,9 @@ async def get_agent(
     return agent
 
 
-@router.get("/search/", response_model=schemas.AgentList)
+@router.get("/search/", response_model=AgentList)
 async def search_agents(
     query: str = Query(..., min_length=1),
-    include_inactive: bool = Query(False, title="Include inactive agents in results"),
     zone_id: Optional[str] = Query(None, description="Filter search to specific zone"),
     world_id: Optional[str] = Query(None, description="Filter search to specific world"),
     page: int = Query(1, ge=1),
@@ -262,7 +256,6 @@ async def search_agents(
     
     agents, total_count, total_pages = agent_service.search_agents(
         query=query,
-        include_inactive=include_inactive,
         zone_id=zone_id,
         world_id=world_id,
         page=page,
@@ -278,10 +271,10 @@ async def search_agents(
     }
 
 
-@router.put("/{agent_id}", response_model=schemas.AgentResponse)
+@router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(
     agent_id: str,
-    agent_update: schemas.AgentUpdate,
+    agent_update: AgentUpdate,
     current_user: User = Depends(get_current_user),
     agent_service: AgentService = Depends(get_service(AgentService)),
     zone_service: ZoneService = Depends(get_service(ZoneService)),
@@ -391,7 +384,7 @@ async def delete_agent(
     return None
 
 
-@router.post("/{agent_id}/activate", response_model=schemas.AgentResponse)
+@router.post("/{agent_id}/activate", response_model=AgentResponse)
 async def activate_agent(
     agent_id: str,
     current_user: User = Depends(get_current_user),
@@ -446,7 +439,7 @@ async def activate_agent(
     return agent
 
 
-@router.post("/{agent_id}/deactivate", response_model=schemas.AgentResponse)
+@router.post("/{agent_id}/deactivate", response_model=AgentResponse)
 async def deactivate_agent(
     agent_id: str,
     current_user: User = Depends(get_current_user),
@@ -501,7 +494,7 @@ async def deactivate_agent(
     return agent
 
 
-@router.post("/{agent_id}/move", response_model=schemas.AgentResponse)
+@router.post("/{agent_id}/move", response_model=AgentResponse)
 async def move_agent_to_zone(
     agent_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),

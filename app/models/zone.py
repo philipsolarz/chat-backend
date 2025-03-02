@@ -30,10 +30,10 @@ class Zone(Base, TimestampMixin):
     # Relationships
     world = relationship("World", back_populates="zones")
     entities = relationship("Entity", back_populates="zone")
-    characters = relationship("Character", back_populates="zone")
-    objects = relationship("Object", back_populates="zone")
-    agents = relationship("Agent", back_populates="zone")
-    players = relationship("Player", back_populates="zone")
+    # characters = relationship("Character", back_populates="zone")
+    # objects = relationship("Object", back_populates="zone")
+    # agents = relationship("Agent", back_populates="zone")
+    # players = relationship("Player", back_populates="zone")
 
     events = relationship("GameEvent", back_populates="zone", cascade="all, delete-orphan")
     

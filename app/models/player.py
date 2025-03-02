@@ -1,5 +1,5 @@
 # app/models/user.py
-from sqlalchemy import Boolean, Column, String, DateTime
+from sqlalchemy import Boolean, Column, ForeignKey, String, DateTime
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -26,20 +26,27 @@ class Player(Base, TimestampMixin):
     # Admin flag for special privileges
     is_admin = Column(Boolean, default=False, nullable=False)
     
-    # Relationships
-    characters = relationship("Character", back_populates="user", cascade="all, delete-orphan")
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    # entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
+    character_id = Column(String(36), ForeignKey("characters.id"), nullable=True)
+
+    # world = relationship("World", back_populates="players")
+    # zone = relationship("Zone", back_populates="players")
+    # entity = relationship("Entity", back_populates="players")
+    character = relationship("Character", back_populates="player")
     
     # User participations in conversations (as specific characters)
     conversation_participations = relationship(
         "ConversationParticipant",
-        back_populates="user",
+        back_populates="player",
         cascade="all, delete-orphan"
     )
     
     # Subscription and usage tracking
-    subscriptions = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan")
-    daily_usage = relationship("UserDailyUsage", back_populates="user", cascade="all, delete-orphan")
-    usage_summary = relationship("UserUsageSummary", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    subscriptions = relationship("UserSubscription", back_populates="player", cascade="all, delete-orphan")
+    daily_usage = relationship("UserDailyUsage", back_populates="player", cascade="all, delete-orphan")
+    usage_summary = relationship("UserUsageSummary", back_populates="player", uselist=False, cascade="all, delete-orphan")
     
     # Worlds owned by this user
     owned_worlds = relationship("World", back_populates="owner", foreign_keys="World.owner_id", cascade="all, delete-orphan")
