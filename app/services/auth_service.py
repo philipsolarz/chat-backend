@@ -6,7 +6,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app.database import supabase, get_db
-from app.models.user import User
+from app.models.player import User
 from app.config import get_settings
 
 settings = get_settings()

@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import math
 
 from app.models.character import Character
-from app.models.user import User
+from app.models.player import User
 
 
 class CharacterService:

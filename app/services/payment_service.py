@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 from app.config import get_settings
-from app.models.user import User
+from app.models.player import User
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 from app.services.user_service import UserService
 

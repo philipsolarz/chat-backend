@@ -10,7 +10,7 @@ from app.api.dependencies import get_service, get_character_owner
 from app.api.premium import require_premium, check_character_limit, check_public_character_permission
 from app.services.character_service import CharacterService
 from app.services.usage_service import UsageService
-from app.models.user import User
+from app.models.player import User
 from app.models.character import Character
 
 router = APIRouter()

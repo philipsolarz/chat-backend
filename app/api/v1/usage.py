@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from app.database import get_db
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
-from app.models.user import User
+from app.models.player import User
 from app.services.usage_service import UsageService
 
 router = APIRouter()

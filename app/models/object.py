@@ -1,21 +1,41 @@
 # app/models/object.py
-from sqlalchemy import Column, Boolean, String
+import enum
+from sqlalchemy import JSON, Column, Boolean, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
+from app.database import Base
+from app.models.entity import EntityType
+from app.models.mixins import TimestampMixin, generate_uuid
 
-from app.models.entity import Entity, EntityType
+class ObjectType(str, enum.Enum):
+    """Types of objects that can exist"""
+    GENERIC = "generic"
 
-
-class Object(Entity):
+class Object(Base, TimestampMixin):
     """
     Model representing objects in the world
     Objects are static entities that can be interacted with
     """
-    # Additional object-specific columns
-    is_interactive = Column(Boolean, default=False)
-    object_type = Column(String(50), nullable=True)  # e.g., "item", "furniture", "landmark"
+    __tablename__ = "objects"
     
-    __mapper_args__ = {
-        'polymorphic_identity': EntityType.OBJECT
-    }
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
     
+    # Object type discriminator
+    type = Column(Enum(ObjectType), nullable=False)
+    
+    # JSON properties for object-specific properties
+    properties = Column(JSON, nullable=True)
+    
+    tier = Column(Integer, default=1)
+    
+    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
+
+    zone = relationship("Zone", back_populates="objects")
+    world = relationship("World", back_populates="objects")
+    entity = relationship("Entity", back_populates="objects")
+
     def __repr__(self):
         return f"<Object {self.id} - {self.name}>"

@@ -9,7 +9,7 @@ from app.models.message import Message
 from app.models.conversation import Conversation, ConversationParticipant
 from app.models.character import Character
 from app.models.agent import Agent
-from app.models.user import User
+from app.models.player import User
 
 
 class MessageService:

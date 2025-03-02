@@ -17,12 +17,14 @@ class Zone(Base, TimestampMixin):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     
-    # JSON settings for zone configuration
-    settings = Column(JSON, nullable=True)
+    # JSON properties for zone configuration
+    properties = Column(JSON, nullable=True)
     
+    tier = Column(Integer, default=1)
+
     # Entity limit configuration
-    entity_limit = Column(Integer, default=25)  # Default limit of 25 entities
-    entity_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
+    # entity_limit = Column(Integer, default=25)  # Default limit of 25 entities
+    # entity_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
     
     # Foreign keys for relationships
     world_id = Column(String(36), ForeignKey("worlds.id"), nullable=False, index=True)
@@ -30,14 +32,16 @@ class Zone(Base, TimestampMixin):
     
     # Relationships
     world = relationship("World", back_populates="zones")
+    entities = relationship("Entity", back_populates="zone")
+    characters = relationship("Character", back_populates="zone")
+    objects = relationship("Object", back_populates="zone")
+    agents = relationship("Agent", back_populates="zone")
+    players = relationship("Player", back_populates="zone")
     
     # Self-referential relationship for sub-zones
     parent_zone = relationship("Zone", back_populates="sub_zones", remote_side=[id])
     sub_zones = relationship("Zone", back_populates="parent_zone")
-    
-    # Entities in this zone (will be updated to point to Entity model)
-    entities = relationship("Entity", back_populates="zone")
-    
+
     def __repr__(self):
         return f"<Zone {self.id} - {self.name} (World: {self.world_id})>"
     

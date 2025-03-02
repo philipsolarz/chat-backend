@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.user import User
+from app.models.player import User
 from app.models.character import Character
 from app.models.agent import Agent
 from app.models.conversation import Conversation, ConversationParticipant
