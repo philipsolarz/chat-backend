@@ -1,5 +1,5 @@
 # app/models/world.py
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -21,6 +21,10 @@ class World(Base, TimestampMixin):
 
     tier = Column(Integer, default=1)
     
+    # New fields for world status
+    is_official = Column(Boolean, default=False, nullable=False)
+    is_private = Column(Boolean, default=False, nullable=False)
+    
     # Creator/owner of the world
     owner_id = Column(String(36), ForeignKey("players.id"), nullable=True)
     
@@ -38,8 +42,3 @@ class World(Base, TimestampMixin):
 
     def __repr__(self):
         return f"<World {self.id} - {self.name}>"
-    
-    # @property
-    # def total_zone_limit(self):
-    #     """Calculate total zone limit with upgrades"""
-    #     return self.zone_limit + (self.zone_limit_upgrades * 100)

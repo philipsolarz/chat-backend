@@ -26,18 +26,29 @@ async def create_world(
     
     Returns the created world
     """
+    # Check if user is admin for setting official status
+    if world.is_official and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can create official worlds"
+        )
+        
     # Create the world
     return world_service.create_world(
         owner_id=current_user.id,
         name=world.name,
         description=world.description,
-        settings=world.settings
+        settings=world.settings,
+        is_official=world.is_official,
+        is_private=world.is_private
     )
 
 
 @router.get("/", response_model=WorldList)
 async def list_worlds(
     name: Optional[str] = None,
+    is_official: Optional[bool] = None,
+    include_private: bool = Query(False, description="Whether to include private worlds"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("name"),
@@ -50,10 +61,18 @@ async def list_worlds(
     
     Returns a paginated list of worlds
     """
-    filters = {'owner_id': current_user.id}
-    # filters = {}
+    filters = {}
+    # filters = {'owner_id': current_user.id}  # Only list user's own worlds
+    
     if name:
         filters['name'] = name
+        
+    if is_official is not None:
+        filters['is_official'] = is_official
+        
+    # Only include private worlds if specifically requested or if user is owner
+    if not include_private:
+        filters['is_private'] = False
 
     worlds, total_count, total_pages = world_service.get_worlds(
         filters=filters,
@@ -81,7 +100,7 @@ async def get_world(
     """
     Get a specific world by ID
     
-    Only the owner can access a world
+    Access is allowed for world owners, admins, or public non-private worlds
     """
     world = world_service.get_world(world_id)
     
@@ -128,6 +147,13 @@ async def update_world(
             detail="You don't have permission to update this world"
         )
     
+    # Check if user is trying to set official status without admin privileges
+    if world_update.is_official is not None and world_update.is_official != world.is_official and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can change the official status of worlds"
+        )
+    
     update_data = world_update.dict(exclude_unset=True)
     
     updated_world = world_service.update_world(world_id, update_data)
@@ -166,6 +192,13 @@ async def delete_world(
             detail="You don't have permission to delete this world"
         )
     
+    # Check if trying to delete an official world without admin privileges
+    if world.is_official and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete official worlds"
+        )
+    
     success = world_service.delete_world(world_id)
     if not success:
         raise HTTPException(
@@ -179,6 +212,8 @@ async def delete_world(
 @router.get("/search/", response_model=WorldList)
 async def search_worlds(
     query: str = Query(..., min_length=1),
+    include_private: bool = Query(False, description="Whether to include private worlds"),
+    is_official: Optional[bool] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -187,11 +222,19 @@ async def search_worlds(
     """
     Search for worlds by name or description
     
-    Returns a paginated list of matching worlds owned by the current user
+    Returns a paginated list of matching worlds
     """
-    worlds, total_count, total_pages = world_service.search_worlds(
-        query=query,
-        user_id=current_user.id,
+    filters = {'search': query}
+    
+    if is_official is not None:
+        filters['is_official'] = is_official
+        
+    # Only include private worlds if specifically requested
+    if not include_private:
+        filters['is_private'] = False
+    
+    worlds, total_count, total_pages = world_service.get_worlds(
+        filters=filters,
         page=page,
         page_size=page_size
     )

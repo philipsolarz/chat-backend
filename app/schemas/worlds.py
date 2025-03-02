@@ -1,3 +1,4 @@
+# app/schemas/worlds.py
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -9,6 +10,8 @@ class WorldBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
+    is_official: bool = False
+    is_private: bool = False
 
 class WorldCreate(WorldBase):
     """Properties required to create a world"""
@@ -19,6 +22,8 @@ class WorldUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
+    is_official: Optional[bool] = None
+    is_private: Optional[bool] = None
 
 class WorldResponse(WorldBase):
     """Response model with all world properties"""
