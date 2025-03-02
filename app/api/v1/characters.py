@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from app.api.schemas import CharacterList
 from app.database import get_db
-from app.api import schemas
+from app.schemas import CharacterBase, CharacterCreate, CharacterResponse, CharacterType, CharacterUpdate, CharacterList
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.api.premium import require_premium, check_character_limit, check_public_character_permission
@@ -19,9 +20,9 @@ from app.models.character import Character, CharacterType
 router = APIRouter()
 
 
-@router.post("/", response_model=schemas.CharacterResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=CharacterResponse, status_code=status.HTTP_201_CREATED)
 async def create_character(
-    character: schemas.CharacterCreate,
+    character: CharacterCreate,
     user_with_capacity: User = Depends(check_character_limit),
     character_service: CharacterService = Depends(get_service(CharacterService)),
     usage_service: UsageService = Depends(get_service(UsageService)),
@@ -89,9 +90,7 @@ async def create_character(
         name=character.name,
         description=character.description,
         world_id=character.world_id,
-        zone_id=character.zone_id,
-        is_public=character.is_public,
-        template=character.template
+        zone_id=character.zone_id
     )
     
     if not new_character:
@@ -103,10 +102,9 @@ async def create_character(
     return new_character
 
 
-@router.get("/", response_model=schemas.CharacterList)
+@router.get("/", response_model=CharacterList)
 async def list_characters(
     name: Optional[str] = None,
-    is_public: Optional[bool] = None,
     world_id: Optional[str] = Query(None, description="Filter characters by world"),
     zone_id: Optional[str] = Query(None, description="Filter characters by zone"),
     page: int = Query(1, ge=1),
@@ -126,10 +124,7 @@ async def list_characters(
     
     if name:
         filters['name'] = name
-    
-    if is_public is not None:
-        filters['is_public'] = is_public
-    
+
     if world_id:
         # Check if user has access to the world
         if not world_service.check_user_access(current_user.id, world_id):
@@ -159,7 +154,7 @@ async def list_characters(
     }
 
 
-@router.get("/public", response_model=schemas.CharacterList)
+@router.get("/public", response_model=CharacterList)
 async def list_public_characters(
     name: Optional[str] = None,
     world_id: Optional[str] = Query(None, description="Filter characters by world"),
@@ -204,7 +199,7 @@ async def list_public_characters(
     }
 
 
-@router.get("/{character_id}", response_model=schemas.CharacterResponse)
+@router.get("/{character_id}", response_model=CharacterResponse)
 async def get_character(
     character_id: str = Path(..., title="The ID of the character to get"),
     current_user: User = Depends(get_current_user),
@@ -234,10 +229,10 @@ async def get_character(
     return character
 
 
-@router.put("/{character_id}", response_model=schemas.CharacterResponse)
+@router.put("/{character_id}", response_model=CharacterResponse)
 async def update_character(
     character_id: str,
-    character_update: schemas.CharacterUpdate,
+    character_update: CharacterUpdate,
     current_user: User = Depends(get_current_user),
     character_service: CharacterService = Depends(get_service(CharacterService)),
     usage_service: UsageService = Depends(get_service(UsageService))
@@ -316,10 +311,9 @@ async def delete_character(
     return None
 
 
-@router.get("/search/", response_model=schemas.CharacterList)
+@router.get("/search/", response_model=CharacterList)
 async def search_characters(
     query: str = Query(..., min_length=1),
-    include_public: bool = Query(False, title="Include public characters in results"),
     world_id: Optional[str] = Query(None, description="Filter search to specific world"),
     zone_id: Optional[str] = Query(None, description="Filter search to specific zone"),
     page: int = Query(1, ge=1),
@@ -345,7 +339,6 @@ async def search_characters(
     
     characters, total_count, total_pages = character_service.search_characters(
         query=query,
-        include_public=include_public,
         user_id=current_user.id,
         page=page,
         page_size=page_size,
@@ -360,78 +353,7 @@ async def search_characters(
         "total_pages": total_pages
     }
 
-
-@router.post("/{character_id}/public", response_model=schemas.CharacterResponse)
-async def make_character_public(
-    character_id: str,
-    premium_user: User = Depends(check_public_character_permission), # This checks premium status
-    character_service: CharacterService = Depends(get_service(CharacterService))
-):
-    """
-    Make a character publicly available for agents (Premium Feature)
-    
-    Returns the updated character
-    """
-    character = character_service.get_character(character_id)
-    if not character:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Character not found"
-        )
-    
-    # Check ownership
-    if character.player_id != premium_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only make your own characters public"
-        )
-    
-    updated_character = character_service.make_character_public(character.id)
-    if not updated_character:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update character"
-        )
-    
-    return updated_character
-
-
-@router.post("/{character_id}/private", response_model=schemas.CharacterResponse)
-async def make_character_private(
-    character_id: str,
-    current_user: User = Depends(get_current_user),
-    character_service: CharacterService = Depends(get_service(CharacterService))
-):
-    """
-    Make a character private (only for owner)
-    
-    Returns the updated character
-    """
-    character = character_service.get_character(character_id)
-    if not character:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Character not found"
-        )
-    
-    # Check ownership
-    if character.player_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only make your own characters private"
-        )
-    
-    updated_character = character_service.make_character_private(character.id)
-    if not updated_character:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update character"
-        )
-    
-    return updated_character
-
-
-@router.post("/{character_id}/move", response_model=schemas.CharacterResponse)
+@router.post("/{character_id}/move", response_model=CharacterResponse)
 async def move_character_to_zone(
     character_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),
@@ -490,7 +412,7 @@ async def move_character_to_zone(
     return updated_character
 
 
-@router.post("/{character_id}/upgrade-tier", response_model=schemas.CharacterResponse)
+@router.post("/{character_id}/upgrade-tier", response_model=CharacterResponse)
 async def create_character_tier_upgrade_checkout(
     character_id: str,
     success_url: str = Query(..., description="URL to redirect after successful payment"),

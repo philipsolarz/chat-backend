@@ -12,7 +12,7 @@ class UserDailyUsage(Base, TimestampMixin):
     __tablename__ = "user_daily_usage"
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
     date = Column(Date, default=date.today, nullable=False)
     
     # Usage metrics
@@ -20,7 +20,7 @@ class UserDailyUsage(Base, TimestampMixin):
     ai_response_count = Column(Integer, default=0, nullable=False)
     
     # Relationships
-    user = relationship("User", back_populates="daily_usage")
+    player = relationship("Player", back_populates="daily_usage")
     
     # Ensure only one record per user per day
     __table_args__ = (
@@ -35,7 +35,7 @@ class UserUsageSummary(Base, TimestampMixin):
     """Model for summarizing lifetime usage metrics for users"""
     __tablename__ = "user_usage_summary"
     
-    user_id = Column(String(36), ForeignKey("users.id"), primary_key=True)
+    user_id = Column(String(36), ForeignKey("players.id"), primary_key=True)
     
     # Lifetime metrics
     total_messages = Column(Integer, default=0, nullable=False)
@@ -48,7 +48,7 @@ class UserUsageSummary(Base, TimestampMixin):
     active_characters = Column(Integer, default=0, nullable=False)
     
     # Relationships
-    user = relationship("User", back_populates="usage_summary")
+    player = relationship("Player", back_populates="usage_summary")
     
     def __repr__(self):
         return f"<UserUsageSummary - User: {self.user_id}>"

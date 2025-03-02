@@ -17,8 +17,7 @@ class AgentService:
     
     def create_agent(self, 
                     name: str, 
-                    description: str = None, 
-                    system_prompt: str = None, 
+                    description: str = None,
                     zone_id: Optional[str] = None,
                     world_id: Optional[str] = None,
                     settings: Optional[Dict[str, Any]] = None) -> Optional[Agent]:
@@ -28,7 +27,6 @@ class AgentService:
         Args:
             name: Name of the agent
             description: Optional description
-            system_prompt: Optional system prompt for AI behavior
             zone_id: Optional zone ID to place the agent in
             world_id: Optional world ID for the agent
             settings: JSON settings for agent configuration
@@ -55,8 +53,6 @@ class AgentService:
         agent = Agent(
             name=name,
             description=description,
-            system_prompt=system_prompt,
-            is_active=True,
             zone_id=zone_id,
             world_id=world_id,
             entity_id=entity.id,
@@ -211,8 +207,7 @@ class AgentService:
         return True
     
     def search_agents(self, 
-                     query: str, 
-                     include_inactive: bool = False,
+                     query: str,
                      zone_id: Optional[str] = None,
                      world_id: Optional[str] = None,
                      page: int = 1, 
@@ -237,18 +232,14 @@ class AgentService:
             
         if world_id:
             filters['world_id'] = world_id
-            
-        # Apply active filter if needed
-        if not include_inactive:
-            filters['is_active'] = True
-        
+
         return self.get_agents(
             filters=filters,
             page=page,
             page_size=page_size
         )
     
-    def count_agents(self, include_inactive: bool = False) -> int:
+    def count_agents(self) -> int:
         """
         Count the number of agents
         
@@ -256,20 +247,9 @@ class AgentService:
             include_inactive: Whether to include inactive agents
         """
         query = self.db.query(func.count(Agent.id))
-        
-        if not include_inactive:
-            query = query.filter(Agent.is_active == True)
-        
+
         return query.scalar() or 0
-    
-    def activate_agent(self, agent_id: str) -> Optional[Agent]:
-        """Activate an agent"""
-        return self.update_agent(agent_id, {"is_active": True})
-    
-    def deactivate_agent(self, agent_id: str) -> Optional[Agent]:
-        """Deactivate an agent"""
-        return self.update_agent(agent_id, {"is_active": False})
-    
+
     def move_agent_to_zone(self, agent_id: str, zone_id: str) -> bool:
         """
         Move an agent to a different zone

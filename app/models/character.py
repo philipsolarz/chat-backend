@@ -31,28 +31,28 @@ class Character(Base, TimestampMixin):
     
     tier = Column(Integer, default=1)
 
-    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
     entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
-    player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
-    agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
+    # player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
+    # agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
 
-    world = relationship("World", back_populates="characters")
-    zone = relationship("Zone", back_populates="characters")
-    entity = relationship("Entity", back_populates="characters")
+    # world = relationship("World", back_populates="characters")
+    # zone = relationship("Zone", back_populates="characters")
+    entity = relationship("Entity", back_populates="character")
 
-    player = relationship("Zone", back_populates="characters")
-    agent = relationship("Zone", back_populates="character")
+    player = relationship("Player", back_populates="character")
+    agent = relationship("Agent", back_populates="character")
 
     initiated_events = relationship("GameEvent", foreign_keys="GameEvent.character_id", back_populates="character")
     event_participations = relationship("EventParticipant", back_populates="character")
 
     # Participation in conversations
-    # conversation_participations = relationship(
-    #     "ConversationParticipant",
-    #     back_populates="character",
-    #     cascade="all, delete-orphan"
-    # )
+    conversation_participations = relationship(
+        "ConversationParticipant",
+        back_populates="character",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Character {self.id} - {self.name}>"

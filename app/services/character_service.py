@@ -23,8 +23,7 @@ class CharacterService:
                         description: Optional[str] = None,
                         world_id: Optional[str] = None,
                         zone_id: Optional[str] = None,
-                        is_public: bool = False,
-                        template: Optional[str] = None) -> Optional[Character]:
+                        ) -> Optional[Character]:
         """
         Create a new character
         
@@ -34,8 +33,6 @@ class CharacterService:
             description: Description of the character (including personality)
             world_id: Optional world ID
             zone_id: Optional zone ID to place the character in
-            is_public: Whether the character can be used by agents
-            template: Optional character template
             
         Returns:
             Created character or None if zone has reached its entity limit
@@ -60,9 +57,7 @@ class CharacterService:
             entity_id=entity.id,
             player_id=user_id,
             world_id=world_id,
-            zone_id=zone_id,
-            template=template,
-            is_public=is_public
+            zone_id=zone_id
         )
         
         self.db.add(character)
@@ -106,10 +101,7 @@ class CharacterService:
             
             if 'description' in filters:
                 query = query.filter(Character.description.ilike(f"%{filters['description']}%"))
-            
-            if 'is_public' in filters:
-                query = query.filter(Character.is_public == filters['is_public'])
-            
+
             if 'world_id' in filters:
                 query = query.filter(Character.world_id == filters['world_id'])
                 
@@ -221,8 +213,7 @@ class CharacterService:
         return True
     
     def search_characters(self, 
-                         query: str, 
-                         include_public: bool = False, 
+                         query: str,
                          user_id: Optional[str] = None, 
                          page: int = 1, 
                          page_size: int = 20,
@@ -232,7 +223,6 @@ class CharacterService:
         
         Args:
             query: Search term
-            include_public: Whether to include public characters
             user_id: Filter by user ID (or None to search all)
             page: Page number
             page_size: Results per page
@@ -245,89 +235,27 @@ class CharacterService:
             filters = {}
             
         filters['search'] = query
-        
-        if user_id:
-            # Filter by user, possibly including public characters
-            if include_public:
-                # This requires a custom query as we need an OR condition
-                search_term = f"%{query}%"
-                q = self.db.query(Character).filter(
-                    or_(
-                        Character.name.ilike(search_term),
-                        Character.description.ilike(search_term)
-                    ),
-                    or_(
-                        Character.player_id == user_id,
-                        Character.is_public == True
-                    )
-                )
-                
-                # Apply additional filters
-                for key, value in filters.items():
-                    if key != 'search' and hasattr(Character, key):
-                        q = q.filter(getattr(Character, key) == value)
-                
-                # Count before pagination
-                total_count = q.count()
-                total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-                
-                # Apply ordering and pagination
-                offset = (page - 1) * page_size if page > 0 else 0
-                characters = q.order_by(Character.name).offset(offset).limit(page_size).all()
-                
-                return characters, total_count, total_pages
-            else:
-                # Just filter by user
-                filters['player_id'] = user_id
-        elif not include_public:
-            # Neither user nor public - return empty result
-            return [], 0, 1
-        else:
-            # Only public characters
-            filters['is_public'] = True
-        
+
         return self.get_characters(
             filters=filters,
             page=page,
             page_size=page_size
         )
     
-    def count_characters(self, user_id: Optional[str] = None, include_public: bool = False) -> int:
+    def count_characters(self, user_id: Optional[str] = None) -> int:
         """
         Count the number of characters
         
         Args:
             user_id: Filter by user ID (or None to count all)
-            include_public: Whether to include public characters in the count
             
         Returns:
             Count of characters matching criteria
         """
         query = self.db.query(func.count(Character.id))
-        
-        if user_id:
-            if include_public:
-                query = query.filter(
-                    or_(
-                        Character.player_id == user_id,
-                        Character.is_public == True
-                    )
-                )
-            else:
-                query = query.filter(Character.player_id == user_id)
-        elif include_public:
-            query = query.filter(Character.is_public == True)
-        
+
         return query.scalar() or 0
-    
-    def make_character_public(self, character_id: str) -> Optional[Character]:
-        """Make a character publicly available for agents"""
-        return self.update_character(character_id, {"is_public": True})
-    
-    def make_character_private(self, character_id: str) -> Optional[Character]:
-        """Make a character private (only for owner)"""
-        return self.update_character(character_id, {"is_public": False})
-        
+
     def move_character_to_zone(self, character_id: str, zone_id: str) -> bool:
         """
         Move a character to a different zone

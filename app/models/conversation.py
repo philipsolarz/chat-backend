@@ -12,8 +12,8 @@ class Conversation(Base, TimestampMixin):
     
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
     title = Column(String(100), nullable=True)  # Optional title for the conversation
-    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    world = relationship("World", back_populates="conversations")
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # world = relationship("World", back_populates="conversations")
     # Relationships
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     participants = relationship("ConversationParticipant", back_populates="conversation", cascade="all, delete-orphan")
@@ -36,7 +36,7 @@ class ConversationParticipant(Base, TimestampMixin):
     character_id = Column(String(36), ForeignKey("characters.id"), nullable=False)
     
     # Either user_id or agent_id must be set, but not both
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    user_id = Column(String(36), ForeignKey("players.id"), nullable=True)
     agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
     
     # Ensure that exactly one of user_id or agent_id is set
@@ -48,5 +48,5 @@ class ConversationParticipant(Base, TimestampMixin):
     # Relationships
     conversation = relationship("Conversation", back_populates="participants")
     character = relationship("Character", back_populates="conversation_participations")
-    user = relationship("User", back_populates="conversation_participations")
+    player = relationship("Player", back_populates="conversation_participations")
     agent = relationship("Agent", back_populates="conversation_participations")

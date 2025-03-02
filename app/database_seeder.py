@@ -75,28 +75,28 @@ def seed_default_agents(db: Session) -> List[Agent]:
         return existing_agents
     
     # First create an entity for the agent
-    default_agent_entity = Entity(
-        name="Assistant",
-        description="A helpful AI assistant that can roleplay as various characters",
-        type=EntityType.AGENT,
-        tier=1
-    )
+    # default_agent_entity = Entity(
+    #     name="Assistant",
+    #     description="A helpful AI assistant that can roleplay as various characters",
+    #     type=EntityType.AGENT,
+    #     tier=1
+    # )
     
-    db.add(default_agent_entity)
-    db.flush()  # Get the ID without fully committing
+    # db.add(default_agent_entity)
+    # db.flush()  # Get the ID without fully committing
     
     # Create default agent
     default_agent = Agent(
         name="Assistant",
         description="A helpful AI assistant that can roleplay as various characters",
-        system_prompt=(
-            "You are a helpful AI assistant participating in a conversation. "
-            "You will be assigned a character to roleplay as, with a specific name and personality. "
-            "Stay in character at all times, responding as your assigned character would. "
-            "Be attentive and engaging, keeping your responses appropriate for the context of the conversation."
-        ),
-        is_active=True,
-        entity_id=default_agent_entity.id,
+        # system_prompt=(
+        #     "You are a helpful AI assistant participating in a conversation. "
+        #     "You will be assigned a character to roleplay as, with a specific name and personality. "
+        #     "Stay in character at all times, responding as your assigned character would. "
+        #     "Be attentive and engaging, keeping your responses appropriate for the context of the conversation."
+        # ),
+        # is_active=True,
+        # entity_id=default_agent_entity.id,
         tier=1
     )
     
@@ -125,28 +125,28 @@ def seed_character_templates(db: Session) -> List[Character]:
         name="Sir Aldric the Valiant",
         description="A noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent.",
         type=EntityType.CHARACTER,
-        tier=1
+        # tier=1
     )
     
     rogue_entity = Entity(
         name="Selene Nightshade",
         description="A cunning rogue and master of stealth, deception, and quick wit.",
         type=EntityType.CHARACTER,
-        tier=1
+        # tier=1
     )
     
     mage_entity = Entity(
         name="Thorne Spellweaver",
         description="An eccentric and brilliant arcane mage with vast knowledge of the magical arts.",
         type=EntityType.CHARACTER,
-        tier=1
+        # tier=1
     )
     
     barbarian_entity = Entity(
         name="Krag Skullcrusher",
         description="A mighty barbarian warrior from the northern mountains.",
         type=EntityType.CHARACTER,
-        tier=1
+        # tier=1
     )
     
     # Add entities to db to get IDs
@@ -183,11 +183,11 @@ Remain in character at all times, shaping responses as Sir Aldric would. Let hon
         name="Sir Aldric the Valiant",
         description="A noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent.",
         type=CharacterType.PLAYER,
-        properties={
-            "is_template": True,
-            "is_public": True,
-            "template": paladin_template
-        },
+        # properties={
+        #     "is_template": True,
+        #     "is_public": True,
+        #     "template": paladin_template
+        # },
         entity_id=paladin_entity.id,
         tier=1
     )
@@ -223,11 +223,11 @@ Stay in character at all times. Every word should carry Selene's cunning, charm,
         name="Selene Nightshade",
         description="A cunning rogue and master of stealth, deception, and quick wit.",
         type=CharacterType.PLAYER,
-        properties={
-            "is_template": True,
-            "is_public": True,
-            "template": rogue_template
-        },
+        # properties={
+        #     "is_template": True,
+        #     "is_public": True,
+        #     "template": rogue_template
+        # },
         entity_id=rogue_entity.id,
         tier=1
     )
@@ -263,11 +263,11 @@ Every response should convey Thorne's magical expertise, intellectual curiosity,
         name="Thorne Spellweaver",
         description="An eccentric and brilliant arcane mage with vast knowledge of the magical arts.",
         type=CharacterType.PLAYER,
-        properties={
-            "is_template": True,
-            "is_public": True,
-            "template": mage_template
-        },
+        # properties={
+        #     "is_template": True,
+        #     "is_public": True,
+        #     "template": mage_template
+        # },
         entity_id=mage_entity.id,
         tier=1
     )
@@ -303,11 +303,11 @@ Each response should emphasize Krag's physical strength, direct approach to prob
         name="Krag Skullcrusher",
         description="A mighty barbarian warrior from the northern mountains.",
         type=CharacterType.PLAYER,
-        properties={
-            "is_template": True,
-            "is_public": True,
-            "template": barbarian_template
-        },
+        # properties={
+        #     "is_template": True,
+        #     "is_public": True,
+        #     "template": barbarian_template
+        # },
         entity_id=barbarian_entity.id,
         tier=1
     )
@@ -549,8 +549,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A massive, ancient tree whose leaves shimmer with magical energy and whose bark seems to shift patterns when not directly observed.",
         type=EntityType.OBJECT,
         properties={"magic_type": "nature", "magical_properties": ["healing", "wisdom"]},
-        tier=1,
-        world_id=world.id,
+        # tier=1,
+        # world_id=world.id,
         zone_id=enchanted_forest.id
     )
     
@@ -559,8 +559,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A small fountain carved from luminescent crystal that flows with water that glows softly in the moonlight.",
         type=EntityType.OBJECT,
         properties={"magic_type": "water", "magical_properties": ["healing", "clarity"]},
-        tier=1,
-        world_id=world.id,
+        # tier=1,
+        # world_id=world.id,
         zone_id=enchanted_forest.id
     )
     
@@ -569,8 +569,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A grand castle with towering spires and massive walls, the seat of power for the kingdom.",
         type=EntityType.OBJECT,
         properties={"building_type": "castle", "contains_npcs": True},
-        tier=1,
-        world_id=world.id,
+        # tier=1,
+        # world_id=world.id,
         zone_id=royal_kingdom.id
     )
     
@@ -579,8 +579,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A bustling market square filled with vendors selling everything from exotic foods to rare magical items.",
         type=EntityType.OBJECT,
         properties={"building_type": "market", "contains_npcs": True},
-        tier=1,
-        world_id=world.id,
+        # tier=1,
+        # world_id=world.id,
         zone_id=royal_kingdom.id
     )
     
@@ -593,8 +593,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A massive, ancient tree whose leaves shimmer with magical energy and whose bark seems to shift patterns when not directly observed.",
         type=ObjectType.GENERIC,
         properties={"is_interactive": True, "magic_type": "nature", "magical_properties": ["healing", "wisdom"]},
-        world_id=world.id,
-        zone_id=enchanted_forest.id,
+        # world_id=world.id,
+        # zone_id=enchanted_forest.id,
         entity_id=magical_tree_entity.id,
         tier=1
     )
@@ -605,8 +605,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A small fountain carved from luminescent crystal that flows with water that glows softly in the moonlight.",
         type=ObjectType.GENERIC,
         properties={"is_interactive": True, "magic_type": "water", "magical_properties": ["healing", "clarity"]},
-        world_id=world.id,
-        zone_id=enchanted_forest.id,
+        # world_id=world.id,
+        # zone_id=enchanted_forest.id,
         entity_id=fountain_entity.id,
         tier=1
     )
@@ -617,8 +617,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A grand castle with towering spires and massive walls, the seat of power for the kingdom.",
         type=ObjectType.GENERIC,
         properties={"is_interactive": True, "building_type": "castle", "contains_npcs": True},
-        world_id=world.id,
-        zone_id=royal_kingdom.id,
+        # world_id=world.id,
+        # zone_id=royal_kingdom.id,
         entity_id=castle_entity.id,
         tier=1
     )
@@ -629,8 +629,8 @@ def seed_starter_objects(db: Session) -> List[Object]:
         description="A bustling market square filled with vendors selling everything from exotic foods to rare magical items.",
         type=ObjectType.GENERIC,
         properties={"is_interactive": True, "building_type": "market", "contains_npcs": True},
-        world_id=world.id,
-        zone_id=royal_kingdom.id,
+        # world_id=world.id,
+        # zone_id=royal_kingdom.id,
         entity_id=market_entity.id,
         tier=1
     )

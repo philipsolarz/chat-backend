@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+from app.schemas import EventParticipantBase, EventParticipantResponse, EventType
 from app.database import get_db
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service

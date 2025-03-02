@@ -29,13 +29,13 @@ class Object(Base, TimestampMixin):
     
     tier = Column(Integer, default=1)
     
-    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
+    # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
     entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
 
-    zone = relationship("Zone", back_populates="objects")
-    world = relationship("World", back_populates="objects")
-    entity = relationship("Entity", back_populates="objects")
+    # zone = relationship("Zone", back_populates="objects")
+    # world = relationship("World", back_populates="objects")
+    entity = relationship("Entity", back_populates="object")
 
     def __repr__(self):
         return f"<Object {self.id} - {self.name}>"
