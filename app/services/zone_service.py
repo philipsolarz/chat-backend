@@ -6,8 +6,7 @@ import math
 
 from app.models.zone import Zone
 from app.models.world import World
-from app.models.character import Character
-from app.models.agent import Agent
+from app.models.entity import Entity
 
 
 class ZoneService:
@@ -20,9 +19,7 @@ class ZoneService:
                    world_id: str,
                    name: str,
                    description: Optional[str] = None,
-                   zone_type: Optional[str] = None,
-                   coordinates: Optional[str] = None,
-                   properties: Optional[str] = None,
+                   settings: Optional[Dict[str, Any]] = None,
                    parent_zone_id: Optional[str] = None) -> Optional[Zone]:
         """
         Create a new zone
@@ -31,9 +28,7 @@ class ZoneService:
             world_id: ID of the world this zone belongs to
             name: Name of the zone
             description: Description of the zone
-            zone_type: Type of zone (city, forest, dungeon, etc.)
-            coordinates: Geographic coordinates (implementation-specific)
-            properties: Additional zone properties (could be JSON)
+            settings: JSON settings for zone configuration
             parent_zone_id: ID of the parent zone (for sub-zones)
             
         Returns:
@@ -63,9 +58,7 @@ class ZoneService:
         zone = Zone(
             name=name,
             description=description,
-            zone_type=zone_type,
-            coordinates=coordinates,
-            properties=properties,
+            settings=settings,
             world_id=world_id,
             parent_zone_id=parent_zone_id
         )
@@ -111,9 +104,6 @@ class ZoneService:
             
             if 'description' in filters:
                 query = query.filter(Zone.description.ilike(f"%{filters['description']}%"))
-            
-            if 'zone_type' in filters:
-                query = query.filter(Zone.zone_type == filters['zone_type'])
             
             if 'parent_zone_id' in filters:
                 if filters['parent_zone_id'] is None:
@@ -165,11 +155,7 @@ class ZoneService:
             List of zones
         """
         if include_subzones and parent_zone_id:
-            # Get the parent zone and all its descendants using recursive CTE
-            # This is advanced SQL and might need to be adapted based on your DB
-            # For now, we'll use a simpler approach
-            
-            # First get the parent zone
+            # Get the parent zone
             parent_zone = self.get_zone(parent_zone_id)
             if not parent_zone:
                 return []
@@ -253,7 +239,7 @@ class ZoneService:
         1. Those sub-zones will have their parent_zone_id set to the deleted zone's parent_zone_id
         2. If the deleted zone has no parent, its sub-zones will become top-level zones
         
-        If the zone has characters or agents:
+        If the zone has entities:
         1. They will be moved to the parent zone
         2. If there's no parent zone, they will need to be moved manually first (can't delete)
         """
@@ -261,21 +247,17 @@ class ZoneService:
         if not zone:
             return False
         
-        # Handle characters and agents in this zone
-        characters = self.db.query(Character).filter(Character.zone_id == zone_id).all()
-        agents = self.db.query(Agent).filter(Agent.zone_id == zone_id).all()
+        # Handle entities in this zone
+        entities = self.db.query(Entity).filter(Entity.zone_id == zone_id).all()
         
-        if (characters or agents) and not zone.parent_zone_id:
+        if entities and not zone.parent_zone_id:
             # Can't delete a zone with entities if it has no parent to move them to
             return False
         
         # Move entities to parent zone if needed
-        if zone.parent_zone_id:
-            for character in characters:
-                character.zone_id = zone.parent_zone_id
-                
-            for agent in agents:
-                agent.zone_id = zone.parent_zone_id
+        if zone.parent_zone_id and entities:
+            for entity in entities:
+                entity.zone_id = zone.parent_zone_id
         
         # Handle sub-zones
         sub_zones = self.db.query(Zone).filter(Zone.parent_zone_id == zone_id).all()
@@ -287,44 +269,6 @@ class ZoneService:
         self.db.commit()
         
         return True
-    
-    def move_character_to_zone(self, character_id: str, zone_id: str) -> bool:
-        """Move a character to a different zone"""
-        character = self.db.query(Character).filter(Character.id == character_id).first()
-        zone = self.get_zone(zone_id)
-        
-        if not character or not zone:
-            return False
-        
-        # Ensure the zone is in the same world as the character
-        if character.world_id != zone.world_id:
-            return False
-        
-        character.zone_id = zone_id
-        self.db.commit()
-        
-        return True
-    
-    def move_agent_to_zone(self, agent_id: str, zone_id: str) -> bool:
-        """Move an agent (NPC) to a different zone"""
-        agent = self.db.query(Agent).filter(Agent.id == agent_id).first()
-        zone = self.get_zone(zone_id)
-        
-        if not agent or not zone:
-            return False
-        
-        agent.zone_id = zone_id
-        self.db.commit()
-        
-        return True
-    
-    def get_characters_in_zone(self, zone_id: str) -> List[Character]:
-        """Get all characters in a specific zone"""
-        return self.db.query(Character).filter(Character.zone_id == zone_id).all()
-    
-    def get_agents_in_zone(self, zone_id: str) -> List[Agent]:
-        """Get all agents (NPCs) in a specific zone"""
-        return self.db.query(Agent).filter(Agent.zone_id == zone_id).all()
     
     def is_descendant(self, potential_descendant_id: str, ancestor_id: str) -> bool:
         """
@@ -357,54 +301,42 @@ class ZoneService:
         """Count the number of zones in a world"""
         return self.db.query(func.count(Zone.id)).filter(Zone.world_id == world_id).scalar() or 0
     
-    def upgrade_world_zone_limit(self, world_id: str) -> bool:
-        """Increase a world's zone limit by purchasing an upgrade"""
-        world = self.db.query(World).filter(World.id == world_id).first()
-        if not world:
-            return False
-            
-        world.zone_limit_upgrades += 1
-        self.db.commit()
-        
-        return True
-    
-    def count_agents_in_zone(self, zone_id: str) -> int:
-        """Count the number of agents in a zone"""
-        from app.models.agent import Agent
-        return self.db.query(func.count(Agent.id)).filter(Agent.zone_id == zone_id).scalar() or 0
+    def count_entities_in_zone(self, zone_id: str) -> int:
+        """Count the number of entities in a zone"""
+        return self.db.query(func.count(Entity.id)).filter(Entity.zone_id == zone_id).scalar() or 0
 
-    def can_add_agent_to_zone(self, zone_id: str) -> bool:
-        """Check if a zone has reached its agent limit"""
+    def can_add_entity_to_zone(self, zone_id: str) -> bool:
+        """Check if a zone has reached its entity limit"""
         zone = self.get_zone(zone_id)
         if not zone:
             return False
             
-        agent_count = self.count_agents_in_zone(zone_id)
-        return agent_count < zone.total_agent_limit
+        entity_count = self.count_entities_in_zone(zone_id)
+        return entity_count < zone.total_entity_limit
 
-    def get_zone_agent_limits(self, zone_id: str) -> Dict[str, Any]:
-        """Get agent limit information for a zone"""
+    def get_zone_entity_limits(self, zone_id: str) -> Dict[str, Any]:
+        """Get entity limit information for a zone"""
         zone = self.get_zone(zone_id)
         if not zone:
             return None
             
-        agent_count = self.count_agents_in_zone(zone_id)
+        entity_count = self.count_entities_in_zone(zone_id)
         
         return {
-            "agent_count": agent_count,
-            "base_limit": zone.agent_limit,
-            "upgrades_purchased": zone.agent_limit_upgrades,
-            "total_limit": zone.total_agent_limit,
-            "remaining_capacity": zone.total_agent_limit - agent_count
+            "entity_count": entity_count,
+            "base_limit": zone.entity_limit,
+            "upgrades_purchased": zone.entity_limit_upgrades,
+            "total_limit": zone.total_entity_limit,
+            "remaining_capacity": zone.total_entity_limit - entity_count
         }
 
-    def upgrade_zone_agent_limit(self, zone_id: str) -> bool:
-        """Increase a zone's agent limit by purchasing an upgrade"""
+    def upgrade_zone_entity_limit(self, zone_id: str) -> bool:
+        """Increase a zone's entity limit by purchasing an upgrade"""
         zone = self.get_zone(zone_id)
         if not zone:
             return False
             
-        zone.agent_limit_upgrades += 1
+        zone.entity_limit_upgrades += 1
         self.db.commit()
         
         return True

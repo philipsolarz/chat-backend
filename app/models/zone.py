@@ -1,5 +1,5 @@
 # app/models/zone.py
-from sqlalchemy import Column, String, Text, ForeignKey, Integer, Boolean, Float, Table
+from sqlalchemy import Column, String, Text, ForeignKey, Integer, JSON
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -17,18 +17,12 @@ class Zone(Base, TimestampMixin):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     
-    # Zone type (city, dungeon, forest, etc)
-    zone_type = Column(String(50), nullable=True)
+    # JSON settings for zone configuration
+    settings = Column(JSON, nullable=True)
     
-    # Geographic info (could be expanded in a real implementation)
-    coordinates = Column(String(100), nullable=True)
-    
-    # Zone properties (could be JSON in a real implementation)
-    properties = Column(Text, nullable=True)
-    
-    # Agent limit configuration
-    agent_limit = Column(Integer, default=25)  # Default limit of 25 agents
-    agent_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
+    # Entity limit configuration
+    entity_limit = Column(Integer, default=25)  # Default limit of 25 entities
+    entity_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
     
     # Foreign keys for relationships
     world_id = Column(String(36), ForeignKey("worlds.id"), nullable=False, index=True)
@@ -41,16 +35,13 @@ class Zone(Base, TimestampMixin):
     parent_zone = relationship("Zone", back_populates="sub_zones", remote_side=[id])
     sub_zones = relationship("Zone", back_populates="parent_zone")
     
-    # Characters in this zone
-    characters = relationship("Character", back_populates="zone")
-    
-    # Agents (NPCs) in this zone
-    agents = relationship("Agent", back_populates="zone")
+    # Entities in this zone (will be updated to point to Entity model)
+    entities = relationship("Entity", back_populates="zone")
     
     def __repr__(self):
         return f"<Zone {self.id} - {self.name} (World: {self.world_id})>"
     
     @property
-    def total_agent_limit(self):
-        """Calculate total agent limit with upgrades"""
-        return self.agent_limit + (self.agent_limit_upgrades * 10)
+    def total_entity_limit(self):
+        """Calculate total entity limit with upgrades"""
+        return self.entity_limit + (self.entity_limit_upgrades * 10)

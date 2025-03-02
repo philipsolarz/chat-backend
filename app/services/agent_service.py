@@ -5,6 +5,9 @@ from typing import List, Optional, Dict, Any, Tuple
 import math
 
 from app.models.agent import Agent
+from app.models.entity import EntityType
+from app.models.zone import Zone
+from app.services.entity_service import EntityService
 
 
 class AgentService:
@@ -12,33 +15,47 @@ class AgentService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.entity_service = EntityService(db)
     
-    def create_agent(self, name: str, description: str = None, system_prompt: str = None, zone_id: Optional[str] = None) -> Optional[Agent]:
+    def create_agent(self, 
+                    name: str, 
+                    description: str = None, 
+                    system_prompt: str = None, 
+                    zone_id: Optional[str] = None,
+                    settings: Optional[Dict[str, Any]] = None) -> Optional[Agent]:
         """
-        Create a new AI agent, optionally assigning it to a zone
+        Create a new AI agent entity
         
         Args:
             name: Name of the agent
             description: Optional description
             system_prompt: Optional system prompt for AI behavior
             zone_id: Optional zone ID to place the agent in
+            settings: JSON settings for agent configuration
             
         Returns:
-            The created agent or None if the zone has reached its agent limit
+            The created agent or None if the zone has reached its entity limit
         """
-        # If zone_id is provided, check the zone's agent limit
+        # If zone_id is provided, check the zone's entity limit
         if zone_id:
+            zone = self.db.query(Zone).filter(Zone.id == zone_id).first()
+            if not zone:
+                return None
+                
+            # Check entity limit
             from app.services.zone_service import ZoneService
             zone_service = ZoneService(self.db)
-            if not zone_service.can_add_agent_to_zone(zone_id):
-                return None  # Zone has reached its agent limit
+            if not zone_service.can_add_entity_to_zone(zone_id):
+                return None
         
         agent = Agent(
             name=name,
             description=description,
+            type=EntityType.AGENT,
             system_prompt=system_prompt,
             is_active=True,
-            zone_id=zone_id
+            zone_id=zone_id,
+            settings=settings
         )
         
         self.db.add(agent)
@@ -70,48 +87,31 @@ class AgentService:
         Returns:
             Tuple of (agents, total_count, total_pages)
         """
-        query = self.db.query(Agent)
+        # Start with entity type filter
+        if filters is None:
+            filters = {}
+        filters['type'] = EntityType.AGENT
         
-        # Apply filters if provided
-        if filters:
-            if 'is_active' in filters:
-                query = query.filter(Agent.is_active == filters['is_active'])
-            
-            if 'name' in filters:
-                query = query.filter(Agent.name.ilike(f"%{filters['name']}%"))
-            
-            if 'description' in filters:
-                query = query.filter(Agent.description.ilike(f"%{filters['description']}%"))
-            
-            if 'ids' in filters and isinstance(filters['ids'], list):
-                query = query.filter(Agent.id.in_(filters['ids']))
-                
-            if 'search' in filters and filters['search']:
-                search_term = f"%{filters['search']}%"
-                query = query.filter(
-                    or_(
-                        Agent.name.ilike(search_term),
-                        Agent.description.ilike(search_term)
-                    )
-                )
+        # Get entities with basic filters
+        entities, total_count, total_pages = self.entity_service.get_entities(
+            filters=filters,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_desc=sort_desc
+        )
         
-        # Get total count before pagination
-        total_count = query.count()
-        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        # Convert entities to agents
+        agents = [entity for entity in entities if isinstance(entity, Agent)]
         
-        # Apply sorting
-        if hasattr(Agent, sort_by):
-            sort_field = getattr(Agent, sort_by)
-            query = query.order_by(sort_field.desc() if sort_desc else sort_field)
-        else:
-            # Default to name
-            query = query.order_by(Agent.name.desc() if sort_desc else Agent.name)
+        # Apply agent-specific filters client-side
+        if 'is_active' in filters:
+            agents = [agent for agent in agents if agent.is_active == filters['is_active']]
         
-        # Apply pagination - convert page to offset
-        offset = (page - 1) * page_size if page > 0 else 0
-        
-        # Get paginated results
-        agents = query.offset(offset).limit(page_size).all()
+        # Recalculate counts if we filtered further
+        if 'is_active' in filters:
+            total_count = len(agents)
+            total_pages = (total_count + page_size - 1) // page_size
         
         return agents, total_count, total_pages
     
@@ -141,18 +141,12 @@ class AgentService:
     
     def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent"""
-        agent = self.get_agent(agent_id)
-        if not agent:
-            return False
-        
-        self.db.delete(agent)
-        self.db.commit()
-        
-        return True
+        return self.entity_service.delete_entity(agent_id)
     
     def search_agents(self, 
                      query: str, 
                      include_inactive: bool = False,
+                     zone_id: Optional[str] = None,
                      page: int = 1, 
                      page_size: int = 20) -> Tuple[List[Agent], int, int]:
         """
@@ -161,19 +155,31 @@ class AgentService:
         Args:
             query: Search term
             include_inactive: Whether to include inactive agents
+            zone_id: Optional zone ID to search within
             page: Page number
             page_size: Results per page
         """
-        filters = {'search': query}
-        
-        if not include_inactive:
-            filters['is_active'] = True
-        
-        return self.get_agents(
-            filters=filters,
+        # Start with entity search
+        entities, total_count, total_pages = self.entity_service.search_entities(
+            query=query,
+            zone_id=zone_id,
+            entity_type=EntityType.AGENT,
             page=page,
             page_size=page_size
         )
+        
+        # Convert entities to agents
+        agents = [entity for entity in entities if isinstance(entity, Agent)]
+        
+        # Filter by active status if needed
+        if not include_inactive:
+            agents = [agent for agent in agents if agent.is_active]
+            
+            # Recalculate counts if we filtered further
+            total_count = len(agents)
+            total_pages = (total_count + page_size - 1) // page_size
+        
+        return agents, total_count, total_pages
     
     def count_agents(self, include_inactive: bool = False) -> int:
         """
@@ -206,23 +212,6 @@ class AgentService:
             zone_id: ID of the destination zone
             
         Returns:
-            True if successful, False if the zone has reached its agent limit
+            True if successful, False if the zone has reached its entity limit
         """
-        agent = self.get_agent(agent_id)
-        if not agent:
-            return False
-        
-        # If moving to the same zone, just return success
-        if agent.zone_id == zone_id:
-            return True
-        
-        # Check if zone has reached its agent limit
-        from app.services.zone_service import ZoneService
-        zone_service = ZoneService(self.db)
-        if not zone_service.can_add_agent_to_zone(zone_id):
-            return False  # Zone has reached its agent limit
-        
-        agent.zone_id = zone_id
-        self.db.commit()
-        
-        return True
+        return self.entity_service.move_entity_to_zone(agent_id, zone_id)

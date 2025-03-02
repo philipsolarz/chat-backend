@@ -1,30 +1,24 @@
 # app/models/agent.py
-from sqlalchemy import Column, ForeignKey, String, Text, Boolean
+from sqlalchemy import Column, Boolean, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base
-from app.models.mixins import TimestampMixin, generate_uuid
+from app.models.entity import Entity, EntityType
 
 
-class Agent(Base, TimestampMixin):
+class Agent(Entity):
     """
-    Model representing AI agents in the system
-    Agents use characters to participate in conversations
+    Model representing AI agents in the system (NPCs)
+    Agents are dynamic entities that can participate in conversations
     """
-    __tablename__ = "agents"
-    
-    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    
     # Agent system prompt (AI instructions)
     system_prompt = Column(Text, nullable=True)
     
-    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
-    zone = relationship("Zone", back_populates="agents")
-
     # Whether the agent is enabled
     is_active = Column(Boolean, default=True)
+    
+    __mapper_args__ = {
+        'polymorphic_identity': EntityType.AGENT
+    }
     
     # Relationships - agent participations in conversations
     conversation_participations = relationship(
@@ -32,3 +26,6 @@ class Agent(Base, TimestampMixin):
         back_populates="agent",
         cascade="all, delete-orphan"
     )
+    
+    def __repr__(self):
+        return f"<Agent {self.id} - {self.name}>"
