@@ -8,8 +8,7 @@ from client.game.state import game_state
 from client.game.chat import chat_manager
 from client.api.zone_service import ZoneService
 from client.api.character_service import CharacterService
-from client.api.conversation_service import ConversationService
-from client.api.message_service import MessageService
+from client.api.entity_service import EntityService
 from client.ui.console import (
     console, clear_screen, show_title, show_error, show_success, show_warning,
     prompt_input, confirm_action, create_menu, display_loading, display_table,
@@ -23,14 +22,17 @@ class ChatView:
     def __init__(self):
         self.zone_service = ZoneService()
         self.character_service = CharacterService()
-        self.conversation_service = ConversationService()
-        self.message_service = MessageService()
+        self.entity_service = EntityService()
         
         self.chat_ui = None
         self.zone_name = None
         self.character_name = None
         self.exit_requested = False
         self.message_queue = asyncio.Queue()
+        
+        # Keep track of entities in the zone
+        self.zone_characters = []
+        self.zone_objects = []
     
     async def initialize_chat(self, zone_id: str, character_id: str) -> bool:
         """Initialize chat for a specific zone and character"""
@@ -58,32 +60,6 @@ class ChatView:
         
         self.character_name = character.get("name", "Unknown Character")
         
-        # Find or create a conversation for this zone
-        conversation = await display_loading(
-            f"Joining zone chat...",
-            self.conversation_service.find_or_create_zone_conversation(zone_id, character_id)
-        )
-        
-        if not conversation:
-            show_error("Failed to join zone chat")
-            return False
-        
-        # Store conversation and participant IDs in game state
-        game_state.current_conversation_id = conversation.get("id")
-        
-        # Find our participant ID if not already set
-        if not game_state.current_participant_id:
-            participants = conversation.get("participants", [])
-            for participant in participants:
-                if (participant.get("user_id") == game_state.current_user_id and 
-                    participant.get("character_id") == character_id):
-                    game_state.current_participant_id = participant.get("id")
-                    break
-        
-        if not game_state.current_participant_id:
-            show_error("Failed to determine participant ID")
-            return False
-        
         # Initialize chat UI
         self.chat_ui = ChatUI(
             f"Zone Chat: {self.zone_name}",
@@ -98,10 +74,29 @@ class ChatView:
         chat_manager.on_typing = self.on_typing
         chat_manager.on_presence = self.on_presence
         
+        # Load zone entities
+        await self.load_zone_entities(zone_id)
+        
         return True
     
+    async def load_zone_entities(self, zone_id: str) -> bool:
+        """Load entities in the zone"""
+        try:
+            # Get characters in the zone
+            characters = await self.zone_service.get_zone_characters(zone_id)
+            self.zone_characters = characters
+            
+            # Get objects in the zone
+            entities = await self.entity_service.get_entities_in_zone(zone_id)
+            self.zone_objects = [e for e in entities if e.get("type") == "object"]
+            
+            return True
+        except Exception as e:
+            console.print(f"[red]Error loading zone entities: {str(e)}[/red]")
+            return False
+    
     async def on_message(self, sender: str, content: str, is_self: bool = False, 
-                         is_ai: bool = False, is_system: bool = True):
+                         is_ai: bool = False, is_system: bool = False):
         """Handle incoming chat message"""
         # Add message to UI
         self.chat_ui.add_message(sender, content, is_self, is_system)
@@ -129,84 +124,111 @@ class ChatView:
     
     async def on_typing(self, user_id: str, participant_id: str, is_typing: bool):
         """Handle typing notifications"""
-        # Get participant information to show who's typing
-        pass  # We'll implement this later if needed
+        # This might not be supported in the new WebSocket format,
+        # but we'll keep it for now
+        pass
     
     async def on_presence(self, active_users: List[Dict[str, Any]]):
         """Handle presence information"""
-        user_count = len(active_users)
-        participants = []
-        
-        for user in active_users:
-            user_participants = user.get("participants", [])
-            participants.extend(user_participants)
-        
-        await self.on_message(
-            "System", 
-            f"Active users in zone: {user_count} | Characters: {len(participants)}", 
-            False, False, True
-        )
-    
-    async def load_recent_messages(self) -> bool:
-        """Load recent messages from the conversation"""
-        if not game_state.current_conversation_id:
-            return False
-            
-        messages = await display_loading(
-            "Loading recent messages...",
-            self.message_service.get_recent_messages(
-                game_state.current_conversation_id,
-                limit=20
-            )
-        )
-        
-        if not messages:
+        character_count = len(active_users)
+        if character_count > 0:
+            character_names = [user.get("name", "Unknown") for user in active_users]
             await self.on_message(
                 "System", 
-                "No previous messages in this zone", 
+                f"Characters in zone: {', '.join(character_names)}", 
                 False, False, True
             )
-            return True
-        
-        # Process messages (newest first, so we need to reverse)
-        for msg in reversed(messages):
-            character_name = msg.get("character_name", "Unknown")
-            content = msg.get("content", "")
-            is_self = msg.get("user_id") == game_state.current_user_id
-            is_ai = msg.get("is_ai", False)
-            
-            self.chat_ui.add_message(character_name, content, is_self, is_system=False)
-        
-        return True
+        else:
+            await self.on_message(
+                "System", 
+                "No other characters detected in this zone", 
+                False, False, True
+            )
     
-    async def start_chat(self) -> None:
+    async def handle_command(self, command: str) -> bool:
+        """Handle special client-side chat commands"""
+        parts = command.split(maxsplit=1)
+        cmd = parts[0].lower()
+        
+        if cmd == '/clear':
+            # Clear chat history
+            self.chat_ui.clear_messages()
+            return True
+            
+        elif cmd == '/help':
+            # Show help in addition to server-side help
+            self.chat_ui.add_message("System", 
+                "Client commands:\n"
+                "/exit - Exit chat\n"
+                "/clear - Clear chat history\n"
+                "/info - Show zone information\n"
+                "/list_objects - List objects in zone\n"
+                "/list_characters - List characters in zone\n", 
+                False, True)
+            return False  # Let server handle it too
+            
+        elif cmd == '/info':
+            # Show zone info
+            self.chat_ui.add_message("System", 
+                f"Current zone: {self.zone_name} (ID: {game_state.current_zone_id})\n"
+                f"Your character: {self.character_name} (ID: {game_state.current_character_id})\n"
+                f"Characters in zone: {len(self.zone_characters)}\n"
+                f"Objects in zone: {len(self.zone_objects)}", 
+                False, True)
+            return True
+            
+        elif cmd == '/list_objects':
+            # List objects in zone
+            if self.zone_objects:
+                object_list = "\n".join([f"{i+1}. {obj.get('name', 'Unknown')} (ID: {obj.get('id', 'unknown')})" 
+                                        for i, obj in enumerate(self.zone_objects)])
+                self.chat_ui.add_message("System", f"Objects in zone:\n{object_list}", False, True)
+            else:
+                self.chat_ui.add_message("System", "No objects in this zone", False, True)
+            return True
+            
+        elif cmd == '/list_characters':
+            # List characters in zone
+            if self.zone_characters:
+                char_list = "\n".join([f"{i+1}. {char.get('name', 'Unknown')} (ID: {char.get('id', 'unknown')})" 
+                                      for i, char in enumerate(self.zone_characters)])
+                self.chat_ui.add_message("System", f"Characters in zone:\n{char_list}", False, True)
+            else:
+                self.chat_ui.add_message("System", "No other characters in this zone", False, True)
+            return True
+            
+        # If not handled, return False to let the server handle it
+        return False
+    
+    async def start_chat(self) -> bool:
         """Start the chat interface"""
         self.exit_requested = False
         
+        # Check requirements
+        if not game_state.current_zone_id or not game_state.current_character_id:
+            show_error("Zone or character ID not set")
+            return False
+            
+        # Initialize chat
+        if not await self.initialize_chat(game_state.current_zone_id, game_state.current_character_id):
+            show_error("Failed to initialize chat")
+            return False
+        
         # Display static chat interface
+        clear_screen()
         self.chat_ui.display()
         
-        # Load recent messages
-        await self.load_recent_messages()
-        
         # Connect to WebSocket
-        if not game_state.current_conversation_id or not game_state.current_participant_id:
-            show_error("Conversation or participant ID not set")
-            return
-        
-        # Start WebSocket connection
-        asyncio.create_task(
+        connection_task = asyncio.create_task(
             chat_manager.start(
-                game_state.current_conversation_id,
-                game_state.current_participant_id
+                game_state.current_character_id,
+                game_state.current_zone_id
             )
         )
         
         # Process user input in a loop
         while not self.exit_requested and not chat_manager.shutdown_requested:
             # Clear current line and get input
-            # We're manually handling input since we want to keep displaying messages
-            # while waiting for input
             user_input = input("> ")
             
             if user_input.strip().lower() == '/exit':
@@ -214,51 +236,25 @@ class ChatView:
                 chat_manager.shutdown_requested = True
                 break
             
-            # Handle other commands
+            # Handle client-side commands
             if user_input.startswith('/'):
-                await self.handle_command(user_input)
-                continue
-            
-            # Send regular message
-            if user_input.strip():
-                # Add as self message
-                self.chat_ui.add_message(self.character_name, user_input, True)
-    
-    async def handle_command(self, command: str) -> None:
-        """Handle chat commands"""
-        parts = command.split(maxsplit=1)
-        cmd = parts[0].lower()
+                # If command wasn't handled by client, send to server
+                if not await self.handle_command(user_input):
+                    # Let the server handle it
+                    chat_manager.user_input_queue.put_nowait(user_input)
+            else:
+                # Regular message - add to UI and send to server
+                if user_input.strip():
+                    self.chat_ui.add_message(self.character_name, user_input, True)
+                    chat_manager.user_input_queue.put_nowait(user_input)
         
-        if cmd == '/help':
-            await self.on_message(
-                "System", 
-                "Available commands:\n"
-                "/exit - Exit chat\n"
-                "/help - Show this help\n"
-                "/who - Show users in zone\n"
-                "/clear - Clear chat\n"
-                "/me <action> - Perform an action",
-                False, False, True
-            )
-        elif cmd == '/who':
-            # Request presence information
-            await chat_manager.request_presence()
-        elif cmd == '/clear':
-            # Clear chat history
-            self.chat_ui.clear_messages()
-            await self.on_message("System", "Chat cleared", False, False, True)
-        elif cmd == '/me' and len(parts) > 1:
-            # Emote/action
-            action = parts[1]
-            message = f"*{self.character_name} {action}*"
-            self.chat_ui.add_message("", message, True)
-            await chat_manager.send_message(message)
-        else:
-            await self.on_message(
-                "System", 
-                f"Unknown command: {cmd}. Type /help for available commands.", 
-                False, False, True
-            )
+        # Wait for connection task to complete
+        try:
+            await connection_task
+        except Exception as e:
+            console.print(f"[red]Error in chat connection: {str(e)}[/red]")
+        
+        return True
     
     async def show_zone_info(self) -> None:
         """Show information about the current zone"""
@@ -281,11 +277,13 @@ class ChatView:
             self.zone_service.get_zone_characters(game_state.current_zone_id)
         )
         
-        # Get agents in zone
-        agents = await display_loading(
-            "Loading NPCs in zone...",
-            self.zone_service.get_zone_agents(game_state.current_zone_id)
+        # Get objects in zone
+        entities = await display_loading(
+            "Loading entities in zone...",
+            self.entity_service.get_entities_in_zone(game_state.current_zone_id)
         )
+        
+        objects = [e for e in entities if e.get("type") == "object"]
         
         show_title(f"Zone: {zone['name']}", "Zone Information")
         
@@ -297,39 +295,36 @@ class ChatView:
         console.print("\n[bold]Characters in this zone:[/bold]")
         if characters:
             for i, char in enumerate(characters, 1):
-                owner = "(You)" if char.get("user_id") == game_state.current_user_id else ""
+                is_self = char.get("id") == game_state.current_character_id
+                owner = "(You)" if is_self else ""
                 console.print(f"[cyan]{i}.[/cyan] {char['name']} {owner}")
         else:
-            console.print("[yellow]No player characters in this zone[/yellow]")
+            console.print("[yellow]No other characters in this zone[/yellow]")
         
-        # Show NPCs
-        console.print("\n[bold]NPCs in this zone:[/bold]")
-        if agents:
-            for i, agent in enumerate(agents, 1):
-                console.print(f"[cyan]{i}.[/cyan] {agent['name']}")
+        # Show objects
+        console.print("\n[bold]Objects in this zone:[/bold]")
+        if objects:
+            for i, obj in enumerate(objects, 1):
+                console.print(f"[cyan]{i}.[/cyan] {obj['name']} (ID: {obj['id']})")
         else:
-            console.print("[yellow]No NPCs in this zone[/yellow]")
+            console.print("[yellow]No objects in this zone[/yellow]")
         
         # Wait for user to press enter
         input("\nPress Enter to continue...")
+
+
+# class EntityService:
+#     """Service for entity-related API operations"""
     
-    async def show_chat_menu(self) -> Optional[str]:
-        """Show chat menu options"""
-        options = [
-            ("enter", "Enter zone chat"),
-            ("info", "View zone information"),
-            ("character", "Change character"),
-            ("back", "Return to world map")
-        ]
-        
-        subtitle = None
-        if game_state.current_zone_id and game_state.current_zone_name:
-            subtitle = f"Current Zone: {game_state.current_zone_name}"
-            
-        if game_state.current_character_id and game_state.current_character_name:
-            if subtitle:
-                subtitle += f" | Character: {game_state.current_character_name}"
-            else:
-                subtitle = f"Character: {game_state.current_character_name}"
-        
-        return create_menu("Zone Chat", options, subtitle)
+#     def __init__(self):
+#         from client.api.base_service import BaseService
+#         self.base_service = BaseService()
+    
+#     async def get_entities_in_zone(self, zone_id: str):
+#         """Get all entities in a zone"""
+#         try:
+#             response = await self.base_service.get(f"/entities/?zone_id={zone_id}")
+#             return response.get("items", [])
+#         except Exception as e:
+#             console.print(f"[red]Error getting entities in zone: {str(e)}[/red]")
+#             return []
