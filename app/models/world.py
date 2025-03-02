@@ -19,10 +19,6 @@ class World(Base, TimestampMixin):
     # JSON properties for world configuration
     properties = Column(JSON, nullable=True)
 
-    # Zone management REPLACED BY TIER SYSTEM
-    # zone_limit = Column(Integer, default=100)
-    # zone_limit_upgrades = Column(Integer, default=0)
-
     tier = Column(Integer, default=1)
     
     # Creator/owner of the world
