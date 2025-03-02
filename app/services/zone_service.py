@@ -20,7 +20,8 @@ class ZoneService:
                    name: str,
                    description: Optional[str] = None,
                    settings: Optional[Dict[str, Any]] = None,
-                   parent_zone_id: Optional[str] = None) -> Optional[Zone]:
+                   parent_zone_id: Optional[str] = None,
+                   tier: int = 1) -> Optional[Zone]:
         """
         Create a new zone
         
@@ -30,18 +31,21 @@ class ZoneService:
             description: Description of the zone
             settings: JSON settings for zone configuration
             parent_zone_id: ID of the parent zone (for sub-zones)
+            tier: Initial tier level (defaults to 1)
             
         Returns:
             The created zone or None if zone limit is reached
         """
-        # Get the world to check zone limits
+        # Check world existence
         world = self.db.query(World).filter(World.id == world_id).first()
         if not world:
             return None
         
         # Check zone limit based on world's tier
-        zone_count = self.db.query(Zone).filter(Zone.world_id == world_id).count()
-        if zone_count >= self.get_world_zone_limit(world.tier):
+        from app.services.world_service import WorldService
+        world_service = WorldService(self.db)
+        
+        if not world_service.can_add_zone_to_world(world_id):
             return None
         
         # Validate parent zone if provided
@@ -54,14 +58,14 @@ class ZoneService:
             if not parent_zone:
                 return None
         
-        # Create zone with tier 1 by default
+        # Create the zone
         zone = Zone(
             name=name,
             description=description,
             settings=settings,
             world_id=world_id,
             parent_zone_id=parent_zone_id,
-            tier=1  # Default tier for new zones
+            tier=tier
         )
         
         self.db.add(zone)
@@ -106,6 +110,9 @@ class ZoneService:
             if 'description' in filters:
                 query = query.filter(Zone.description.ilike(f"%{filters['description']}%"))
             
+            if 'tier' in filters:
+                query = query.filter(Zone.tier == filters['tier'])
+            
             if 'parent_zone_id' in filters:
                 if filters['parent_zone_id'] is None:
                     # Get top-level zones (no parent)
@@ -135,71 +142,74 @@ class ZoneService:
             # Default to name
             query = query.order_by(Zone.name.desc() if sort_desc else Zone.name)
         
-        # Apply pagination - convert page to offset
+        # Apply pagination
         offset = (page - 1) * page_size if page > 0 else 0
-        
-        # Get paginated results
         zones = query.offset(offset).limit(page_size).all()
         
         return zones, total_count, total_pages
     
-    def get_world_zones(self, world_id: str, parent_zone_id: Optional[str] = None, include_subzones: bool = False) -> List[Zone]:
+    def get_zone_hierarchy(self, world_id: str) -> List[Dict[str, Any]]:
         """
-        Get zones for a specific world, optionally filtered by parent zone
+        Get the full zone hierarchy for a world
         
         Args:
             world_id: ID of the world
-            parent_zone_id: ID of the parent zone (for sub-zones), or None for top-level zones
-            include_subzones: Whether to include all subzones recursively (ignores pagination)
             
         Returns:
-            List of zones
+            List of top-level zones with nested sub-zones
         """
-        if include_subzones and parent_zone_id:
-            # Get the parent zone
-            parent_zone = self.get_zone(parent_zone_id)
-            if not parent_zone:
-                return []
-                
-            # Then get all zones in this world and filter client-side
-            all_zones = self.db.query(Zone).filter(Zone.world_id == world_id).all()
+        # Get all zones for this world
+        all_zones = self.db.query(Zone).filter(Zone.world_id == world_id).all()
+        
+        # Build a dictionary mapping parent IDs to children
+        parent_to_children = {}
+        for zone in all_zones:
+            parent_id = zone.parent_zone_id
+            if parent_id not in parent_to_children:
+                parent_to_children[parent_id] = []
+            parent_to_children[parent_id].append(zone)
+        
+        # Build the hierarchy starting with top-level zones
+        top_level_zones = parent_to_children.get(None, [])
+        
+        def build_tree(zone):
+            """Recursively build the zone tree"""
+            result = {
+                "id": zone.id,
+                "name": zone.name,
+                "description": zone.description,
+                "tier": zone.tier,
+                "settings": zone.settings,
+                "world_id": zone.world_id,
+                "parent_zone_id": zone.parent_zone_id,
+                "created_at": zone.created_at.isoformat(),
+                "updated_at": zone.updated_at.isoformat(),
+                "sub_zones": []
+            }
             
-            # Build a dictionary mapping parent IDs to children
-            parent_to_children = {}
-            for zone in all_zones:
-                parent_id = zone.parent_zone_id
-                if parent_id not in parent_to_children:
-                    parent_to_children[parent_id] = []
-                parent_to_children[parent_id].append(zone)
-            
-            # Now collect all zones recursively
-            result = []
-            
-            def collect_zones(zone_id):
-                children = parent_to_children.get(zone_id, [])
-                for child in children:
-                    result.append(child)
-                    collect_zones(child.id)
-            
-            # Start collection from the parent zone
-            result.append(parent_zone)
-            collect_zones(parent_zone_id)
+            # Add children recursively
+            children = parent_to_children.get(zone.id, [])
+            for child in children:
+                result["sub_zones"].append(build_tree(child))
             
             return result
-            
-        else:
-            # Simple filtering by world_id and parent_zone_id
-            query = self.db.query(Zone).filter(Zone.world_id == world_id)
-            
-            if parent_zone_id is not None:
-                query = query.filter(Zone.parent_zone_id == parent_zone_id)
-            else:
-                query = query.filter(Zone.parent_zone_id.is_(None))
-                
-            return query.order_by(Zone.name).all()
+        
+        # Build the tree structure
+        hierarchy = [build_tree(zone) for zone in top_level_zones]
+        
+        return hierarchy
     
     def update_zone(self, zone_id: str, update_data: Dict[str, Any]) -> Optional[Zone]:
-        """Update a zone"""
+        """
+        Update a zone's properties
+        
+        Args:
+            zone_id: ID of the zone to update
+            update_data: Dictionary of fields to update
+            
+        Returns:
+            Updated zone or None if not found or update failed
+        """
         zone = self.get_zone(zone_id)
         if not zone:
             return None
@@ -243,6 +253,12 @@ class ZoneService:
         If the zone has entities:
         1. They will be moved to the parent zone
         2. If there's no parent zone, they will need to be moved manually first (can't delete)
+        
+        Args:
+            zone_id: ID of the zone to delete
+            
+        Returns:
+            True if successful, False otherwise
         """
         zone = self.get_zone(zone_id)
         if not zone:
@@ -306,34 +322,9 @@ class ZoneService:
         """Count the number of entities in a zone"""
         return self.db.query(func.count(Entity.id)).filter(Entity.zone_id == zone_id).scalar() or 0
 
-    def can_add_entity_to_zone(self, zone_id: str) -> bool:
-        """Check if a zone has reached its entity limit based on tier"""
-        zone = self.get_zone(zone_id)
-        if not zone:
-            return False
-            
-        entity_count = self.count_entities_in_zone(zone_id)
-        return entity_count < self.get_zone_entity_limit(zone.tier)
-
-    def get_zone_entity_limits(self, zone_id: str) -> Dict[str, Any]:
-        """Get entity limit information for a zone based on tier"""
-        zone = self.get_zone(zone_id)
-        if not zone:
-            return None
-            
-        entity_count = self.count_entities_in_zone(zone_id)
-        entity_limit = self.get_zone_entity_limit(zone.tier)
-        
-        return {
-            "entity_count": entity_count,
-            "tier": zone.tier,
-            "entity_limit": entity_limit,
-            "remaining_capacity": entity_limit - entity_count
-        }
-
-    def get_zone_entity_limit(self, tier: int) -> int:
+    def calculate_entity_limit(self, tier: int) -> int:
         """
-        Get the entity limit for a zone based on its tier
+        Calculate entity limit based on tier
         
         Args:
             tier: The zone's tier
@@ -344,24 +335,61 @@ class ZoneService:
         # Base entity limit for tier 1
         BASE_ENTITY_LIMIT = 25
         
-        # Formula: base * tier (can be adjusted with more complex formulas as needed)
+        # Formula: base * tier
         return BASE_ENTITY_LIMIT * tier
 
-    def get_world_zone_limit(self, world_tier: int) -> int:
+    def can_add_entity_to_zone(self, zone_id: str) -> bool:
         """
-        Get the zone limit for a world based on its tier
+        Check if a zone has reached its entity limit based on tier
         
         Args:
-            world_tier: The world's tier
+            zone_id: ID of the zone
             
         Returns:
-            The maximum number of zones the world can contain
+            True if more entities can be added, False otherwise
         """
-        # Base zone limit for tier 1
-        BASE_ZONE_LIMIT = 10
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return False
+            
+        entity_count = self.count_entities_in_zone(zone_id)
+        entity_limit = self.calculate_entity_limit(zone.tier)
         
-        # Formula: base * tier (can be adjusted with more complex formulas as needed)
-        return BASE_ZONE_LIMIT * world_tier
+        return entity_count < entity_limit
+
+    def get_zone_entity_limits(self, zone_id: str) -> Dict[str, Any]:
+        """
+        Get entity limit information for a zone based on tier
+        
+        Args:
+            zone_id: ID of the zone
+            
+        Returns:
+            Dictionary with entity limit information
+        """
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return {
+                "entity_count": 0,
+                "entity_limit": 0,
+                "remaining_capacity": 0,
+                "usage_percentage": 0,
+                "tier": 0
+            }
+            
+        entity_count = self.count_entities_in_zone(zone_id)
+        entity_limit = self.calculate_entity_limit(zone.tier)
+        
+        remaining_capacity = max(0, entity_limit - entity_count)
+        usage_percentage = (entity_count / entity_limit * 100) if entity_limit > 0 else 100
+        
+        return {
+            "entity_count": entity_count,
+            "entity_limit": entity_limit,
+            "remaining_capacity": remaining_capacity,
+            "usage_percentage": round(usage_percentage, 2),
+            "tier": zone.tier
+        }
 
     def upgrade_zone_tier(self, zone_id: str) -> bool:
         """
@@ -382,3 +410,56 @@ class ZoneService:
         self.db.commit()
         
         return True
+        
+    def get_zone_with_entities(self, zone_id: str) -> Dict[str, Any]:
+        """
+        Get a zone with its entity counts by type
+        
+        Args:
+            zone_id: ID of the zone
+            
+        Returns:
+            Zone details with entity counts
+        """
+        zone = self.get_zone(zone_id)
+        if not zone:
+            return None
+            
+        # Count entities by type
+        from app.models.entity import EntityType
+        
+        entity_counts = {}
+        for entity_type in EntityType:
+            count = self.db.query(func.count(Entity.id)).filter(
+                Entity.zone_id == zone_id,
+                Entity.type == entity_type
+            ).scalar() or 0
+            entity_counts[entity_type.value] = count
+            
+        # Count sub-zones
+        sub_zone_count = self.db.query(func.count(Zone.id)).filter(
+            Zone.parent_zone_id == zone_id
+        ).scalar() or 0
+        
+        # Get entity limits
+        entity_limit = self.calculate_entity_limit(zone.tier)
+        total_entities = sum(entity_counts.values())
+        
+        result = {
+            "id": zone.id,
+            "name": zone.name,
+            "description": zone.description,
+            "world_id": zone.world_id,
+            "parent_zone_id": zone.parent_zone_id,
+            "tier": zone.tier,
+            "settings": zone.settings,
+            "created_at": zone.created_at.isoformat(),
+            "updated_at": zone.updated_at.isoformat(),
+            "entity_counts": entity_counts,
+            "total_entities": total_entities,
+            "sub_zone_count": sub_zone_count,
+            "entity_limit": entity_limit,
+            "remaining_capacity": max(0, entity_limit - total_entities)
+        }
+        
+        return result

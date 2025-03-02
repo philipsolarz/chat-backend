@@ -22,10 +22,7 @@ class Zone(Base, TimestampMixin):
     
     tier = Column(Integer, default=1)
 
-    # Entity limit configuration
-    # entity_limit = Column(Integer, default=25)  # Default limit of 25 entities
-    # entity_limit_upgrades = Column(Integer, default=0)  # Number of upgrades purchased
-    
+    # owner_id = Column(String(36), ForeignKey("players.id"), nullable=True, default=ForeignKey("worlds.owner_id"))
     # Foreign keys for relationships
     world_id = Column(String(36), ForeignKey("worlds.id"), nullable=False, index=True)
     parent_zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True, index=True)
