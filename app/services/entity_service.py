@@ -44,6 +44,9 @@ class EntityService:
             if 'zone_id' in filters:
                 query = query.filter(Entity.zone_id == filters['zone_id'])
             
+            if 'world_id' in filters:
+                query = query.filter(Entity.world_id == filters['world_id'])
+            
             if 'name' in filters:
                 query = query.filter(Entity.name.ilike(f"%{filters['name']}%"))
             
@@ -113,6 +116,7 @@ class EntityService:
     def search_entities(self, 
                        query: str,
                        zone_id: Optional[str] = None,
+                       world_id: Optional[str] = None,
                        entity_type: Optional[EntityType] = None,
                        page: int = 1, 
                        page_size: int = 20) -> Tuple[List[Entity], int, int]:
@@ -122,6 +126,7 @@ class EntityService:
         Args:
             query: Search term
             zone_id: Optional zone ID to search within
+            world_id: Optional world ID to search within
             entity_type: Optional filter for entity type
             page: Page number
             page_size: Results per page
@@ -133,6 +138,9 @@ class EntityService:
         
         if zone_id is not None:
             filters['zone_id'] = zone_id
+            
+        if world_id is not None:
+            filters['world_id'] = world_id
             
         if entity_type is not None:
             filters['type'] = entity_type
@@ -199,6 +207,29 @@ class EntityService:
         self.db.commit()
         
         return True
+
+    def update_entity_fields(self, entity_id: str, update_data: Dict[str, Any]) -> Optional[Entity]:
+        """
+        Update common fields of an entity, used by character and object services
+        
+        Args:
+            entity_id: ID of the entity to update
+            update_data: Dictionary with fields to update
+            
+        Returns:
+            Updated entity or None if not found
+        """
+        entity = self.get_entity(entity_id)
+        if not entity:
+            return None
+        
+        # Update only common fields that should propagate to the entity
+        for key in ['name', 'description']:
+            if key in update_data:
+                setattr(entity, key, update_data[key])
+        
+        # No need to commit here as the calling service will handle it
+        return entity
     
     def move_entity_to_zone(self, entity_id: str, zone_id: str) -> bool:
         """
@@ -229,8 +260,40 @@ class EntityService:
         
         # Move the entity
         entity.zone_id = zone_id
+        # Update world_id to match zone's world_id for consistency
+        entity.world_id = zone.world_id
         self.db.commit()
         
+        return True
+
+    def move_entity_with_related(self, entity_id: str, related_obj: Any, zone_id: str) -> bool:
+        """
+        Move an entity and update its related object's zone_id
+        
+        Args:
+            entity_id: ID of the entity to move
+            related_obj: Related object (Character or Object) to update
+            zone_id: ID of the destination zone
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        # First try to move the entity
+        success = self.move_entity_to_zone(entity_id, zone_id)
+        if not success:
+            return False
+            
+        # If successful, update the related object's zone_id
+        if related_obj and hasattr(related_obj, 'zone_id'):
+            related_obj.zone_id = zone_id
+            
+            # Get zone's world_id to ensure consistency
+            zone = self.db.query(Zone).filter(Zone.id == zone_id).first()
+            if zone and hasattr(related_obj, 'world_id'):
+                related_obj.world_id = zone.world_id
+                
+            self.db.commit()
+            
         return True
         
     def upgrade_entity_tier(self, entity_id: str) -> bool:
@@ -252,3 +315,41 @@ class EntityService:
         self.db.commit()
         
         return True
+        
+    def check_entity_ownership(self, entity_id: str, user_id: str) -> bool:
+        """
+        Check if an entity is owned by a user
+        
+        Args:
+            entity_id: ID of the entity to check
+            user_id: ID of the user
+            
+        Returns:
+            True if user owns the entity's world, False otherwise
+        """
+        entity = self.get_entity(entity_id)
+        if not entity:
+            return False
+            
+        # Check world ownership directly if entity has world_id
+        if entity.world_id:
+            from app.services.world_service import WorldService
+            world_service = WorldService(self.db)
+            world = world_service.get_world(entity.world_id)
+            return world is not None and world.owner_id == user_id
+            
+        # Check zone's world ownership if entity has zone_id
+        elif entity.zone_id:
+            from app.services.zone_service import ZoneService
+            zone_service = ZoneService(self.db)
+            zone = zone_service.get_zone(entity.zone_id)
+            if not zone:
+                return False
+                
+            from app.services.world_service import WorldService
+            world_service = WorldService(self.db)
+            world = world_service.get_world(zone.world_id)
+            return world is not None and world.owner_id == user_id
+            
+        # If entity has no world or zone, only admin can manage it
+        return False

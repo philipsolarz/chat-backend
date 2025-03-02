@@ -14,14 +14,8 @@ class ObjectService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.entity_service = None  # Initialized lazily to avoid circular imports
-    
-    def _get_entity_service(self):
-        """Lazy initialization of EntityService to avoid circular imports"""
-        if self.entity_service is None:
-            from app.services.entity_service import EntityService
-            self.entity_service = EntityService(self.db)
-        return self.entity_service
+        from app.services.entity_service import EntityService
+        self.entity_service = EntityService(db)
     
     def create_object(self, 
                      name: str,
@@ -47,9 +41,7 @@ class ObjectService:
             The created object or None if the zone has reached its entity limit
         """
         # First, create an entity
-        entity_service = self._get_entity_service()
-        
-        entity = entity_service.create_entity(
+        entity = self.entity_service.create_entity(
             name=name,
             description=description,
             entity_type=EntityType.OBJECT,
@@ -154,27 +146,23 @@ class ObjectService:
         return objects, total_count, total_pages
     
     def update_object(self, object_id: str, update_data: Dict[str, Any]) -> Optional[Object]:
-        """Update an object"""
+        """
+        Update an object and its underlying entity if needed
+        
+        Args:
+            object_id: ID of the object to update
+            update_data: Dictionary of fields to update
+            
+        Returns:
+            Updated object or None if not found
+        """
         obj = self.get_object(object_id)
         if not obj:
             return None
         
         # If we're updating basic properties, update the entity as well
-        entity = None
-        entity_updates = {}
-        if obj.entity_id:
-            entity = self.db.query(Entity).filter(Entity.id == obj.entity_id).first()
-            
-            if entity:
-                # Collect entity updates
-                if 'name' in update_data:
-                    entity_updates['name'] = update_data['name']
-                if 'description' in update_data:
-                    entity_updates['description'] = update_data['description']
-                
-                # Apply entity updates
-                for key, value in entity_updates.items():
-                    setattr(entity, key, value)
+        if obj.entity_id and ('name' in update_data or 'description' in update_data):
+            self.entity_service.update_entity_fields(obj.entity_id, update_data)
         
         # Update object fields
         for key, value in update_data.items():
@@ -182,16 +170,20 @@ class ObjectService:
                 setattr(obj, key, value)
         
         self.db.commit()
-        
-        if obj:
-            self.db.refresh(obj)
-        if entity:
-            self.db.refresh(entity)
+        self.db.refresh(obj)
         
         return obj
     
     def delete_object(self, object_id: str) -> bool:
-        """Delete an object and its associated entity"""
+        """
+        Delete an object and its associated entity
+        
+        Args:
+            object_id: ID of the object to delete
+            
+        Returns:
+            True if successful, False if not found
+        """
         obj = self.get_object(object_id)
         if not obj:
             return False
@@ -205,10 +197,7 @@ class ObjectService:
         
         # Delete the associated entity if it exists
         if entity_id:
-            entity = self.db.query(Entity).filter(Entity.id == entity_id).first()
-            if entity:
-                self.db.delete(entity)
-                self.db.commit()
+            self.entity_service.delete_entity(entity_id)
         
         return True
     
@@ -231,6 +220,9 @@ class ObjectService:
             object_type: Optional filter for object type
             page: Page number
             page_size: Results per page
+            
+        Returns:
+            Tuple of (objects, total_count, total_pages)
         """
         # Start with basic search filter
         filters = {'search': query}
@@ -263,22 +255,18 @@ class ObjectService:
             zone_id: ID of the destination zone
             
         Returns:
-            True if successful, False if the zone has reached its entity limit
+            True if successful, False otherwise
         """
         obj = self.get_object(object_id)
         if not obj or not obj.entity_id:
             return False
             
-        # Use EntityService to move the underlying entity
-        entity_service = self._get_entity_service()
-        
-        if entity_service.move_entity_to_zone(obj.entity_id, zone_id):
-            # Update the object's zone_id to match
-            obj.zone_id = zone_id
-            self.db.commit()
-            return True
-        
-        return False
+        # Use EntityService to handle the move
+        return self.entity_service.move_entity_with_related(
+            entity_id=obj.entity_id,
+            related_obj=obj,
+            zone_id=zone_id
+        )
         
     def upgrade_object_tier(self, object_id: str) -> bool:
         """
@@ -296,11 +284,10 @@ class ObjectService:
             
         # Increment tier
         obj.tier += 1
-        self.db.commit()
         
         # Also upgrade the entity if present
         if obj.entity_id:
-            entity_service = self._get_entity_service()
-            entity_service.upgrade_entity_tier(obj.entity_id)
-        
+            self.entity_service.upgrade_entity_tier(obj.entity_id)
+            
+        self.db.commit()
         return True

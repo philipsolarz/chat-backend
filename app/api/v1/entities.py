@@ -6,12 +6,12 @@ from typing import List, Optional, Dict, Any
 from app.database import get_db
 from app.api import schemas
 from app.api.auth import get_current_user
-from app.api.dependencies import get_service
+from app.api.dependencies import check_entity_ownership, get_service
 from app.services.entity_service import EntityService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
 from app.models.player import User
-from app.models.entity import EntityType
+from app.models.entity import Entity, EntityType
 
 router = APIRouter()
 
@@ -148,10 +148,9 @@ async def get_entity(
 async def move_entity_to_zone(
     entity_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),
-    current_user: User = Depends(get_current_user),
+    entity: Entity = Depends(check_entity_ownership),  # Use new dependency
     entity_service: EntityService = Depends(get_service(EntityService)),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    world_service: WorldService = Depends(get_service(WorldService))
+    zone_service: ZoneService = Depends(get_service(ZoneService))
 ):
     """
     Move an entity to a different zone
@@ -161,14 +160,6 @@ async def move_entity_to_zone(
     2. The destination zone exists and has capacity based on its tier
     3. The user has permission to move the entity
     """
-    # Check if entity exists
-    entity = entity_service.get_entity(entity_id)
-    if not entity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Entity not found"
-        )
-    
     # Check if destination zone exists
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -176,23 +167,6 @@ async def move_entity_to_zone(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Destination zone not found"
         )
-    
-    # Check if user is the world owner
-    world = world_service.get_world(zone.world_id)
-    if not world or world.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the world owner can move entities"
-        )
-    
-    # If entity is already in a zone, check that it's in the same world
-    if entity.zone_id:
-        source_zone = zone_service.get_zone(entity.zone_id)
-        if source_zone and source_zone.world_id != zone.world_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot move entity between different worlds"
-            )
     
     # Move the entity
     success = entity_service.move_entity_to_zone(entity_id, zone_id)
@@ -210,49 +184,14 @@ async def move_entity_to_zone(
 @router.post("/{entity_id}/upgrade-tier", response_model=schemas.EntityResponse)
 async def upgrade_entity_tier(
     entity_id: str,
-    current_user: User = Depends(get_current_user),
-    entity_service: EntityService = Depends(get_service(EntityService)),
-    zone_service: ZoneService = Depends(get_service(ZoneService)),
-    world_service: WorldService = Depends(get_service(WorldService))
+    entity: Entity = Depends(check_entity_ownership),  # Use new dependency
+    entity_service: EntityService = Depends(get_service(EntityService))
 ):
     """
     Upgrade an entity's tier
     
     Only the world owner can upgrade entity tiers
     """
-    # Get the entity
-    entity = entity_service.get_entity(entity_id)
-    if not entity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Entity not found"
-        )
-    
-    # Check ownership permissions
-    if entity.world_id:
-        world = world_service.get_world(entity.world_id)
-        if not world or world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can upgrade entity tiers"
-            )
-    elif entity.zone_id:
-        zone = zone_service.get_zone(entity.zone_id)
-        if zone:
-            world = world_service.get_world(zone.world_id)
-            if not world or world.owner_id != current_user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only the world owner can upgrade entity tiers"
-                )
-    else:
-        # Standalone entity without world or zone - use a fallback method to check permissions
-        # This might depend on your application's specific rules
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot upgrade this entity as it's not part of any world or zone"
-        )
-    
     # Perform the tier upgrade
     success = entity_service.upgrade_entity_tier(entity_id)
     if not success:

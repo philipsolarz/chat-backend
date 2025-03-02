@@ -8,10 +8,14 @@ from app.models.player import User
 from app.models.character import Character
 from app.models.agent import Agent
 from app.models.conversation import Conversation, ConversationParticipant
+from app.models.entity import Entity
 from app.api.auth import get_current_user
 from app.services.character_service import CharacterService
 from app.services.agent_service import AgentService
 from app.services.conversation_service import ConversationService
+from app.services.entity_service import EntityService
+from app.services.world_service import WorldService
+from app.services.zone_service import ZoneService
 
 
 def get_service(service_class):
@@ -38,7 +42,7 @@ def get_character_owner(
             detail="Character not found"
         )
     
-    if character.user_id != current_user.id:
+    if character.player_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this character"
@@ -101,3 +105,111 @@ def get_participant_owner(
         )
     
     return participant
+
+
+def check_entity_ownership(
+    entity_id: str,
+    current_user: User = Depends(get_current_user),
+    entity_service: EntityService = Depends(get_service(EntityService)),
+    world_service: WorldService = Depends(get_service(WorldService)),
+    zone_service: ZoneService = Depends(get_service(ZoneService))
+) -> Entity:
+    """
+    Dependency to verify user owns the world containing an entity
+    Raises appropriate HTTP exceptions if checks fail
+    Returns the entity if successful
+    """
+    entity = entity_service.get_entity(entity_id)
+    if not entity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entity not found"
+        )
+    
+    # If entity has a world ID, check ownership directly
+    if entity.world_id:
+        world = world_service.get_world(entity.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can manage this entity"
+            )
+    
+    # If entity has a zone ID, check the zone's world ownership
+    elif entity.zone_id:
+        zone = zone_service.get_zone(entity.zone_id)
+        if not zone:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Zone not found"
+            )
+            
+        world = world_service.get_world(zone.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can manage this entity"
+            )
+    else:
+        # If no world or zone, require admin privileges
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can manage unassigned entities"
+            )
+    
+    return entity
+
+
+def check_object_ownership(
+    object_id: str,
+    current_user: User = Depends(get_current_user),
+    object_service = Depends(get_service("ObjectService")),
+    world_service: WorldService = Depends(get_service(WorldService)),
+    zone_service: ZoneService = Depends(get_service(ZoneService))
+) -> Any:
+    """
+    Dependency to verify user owns the world containing an object
+    Raises appropriate HTTP exceptions if checks fail
+    Returns the object if successful
+    """
+    obj = object_service.get_object(object_id)
+    if not obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Object not found"
+        )
+    
+    # If object has a world ID, check ownership directly
+    if obj.world_id:
+        world = world_service.get_world(obj.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can manage this object"
+            )
+    
+    # If object has a zone ID, check the zone's world ownership
+    elif obj.zone_id:
+        zone = zone_service.get_zone(obj.zone_id)
+        if not zone:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Zone not found"
+            )
+            
+        world = world_service.get_world(zone.world_id)
+        if not world or world.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the world owner can manage this object"
+            )
+    else:
+        # If no world or zone, require admin privileges
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can manage unassigned objects"
+            )
+    
+    return obj
