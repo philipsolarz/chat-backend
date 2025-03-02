@@ -13,7 +13,7 @@ from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
 from app.services.usage_service import UsageService
 from app.ai.agent_manager import AgentManager
-from app.models.user import User
+from app.models.player import User
 from app.models.conversation import Conversation
 
 router = APIRouter()

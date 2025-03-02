@@ -6,12 +6,12 @@ from app.database import Base
 from app.models.mixins import TimestampMixin
 
 
-class User(Base, TimestampMixin):
+class Player(Base, TimestampMixin):
     """
     Model representing user accounts
     The id is linked to Supabase auth.users.id
     """
-    __tablename__ = "users"
+    __tablename__ = "players"
     
     id = Column(String(36), primary_key=True, index=True)  # Linked to Supabase auth.users.id
     first_name = Column(String(50), nullable=True)

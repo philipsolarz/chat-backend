@@ -1,5 +1,5 @@
 # app/models/entity.py
-from sqlalchemy import Column, String, Text, ForeignKey, JSON, Enum
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, JSON, Enum
 from sqlalchemy.orm import relationship
 import enum
 
@@ -9,10 +9,8 @@ from app.models.mixins import TimestampMixin, generate_uuid
 
 class EntityType(str, enum.Enum):
     """Types of entities that can exist in zones"""
-    AGENT = "agent"
+    CHARACTER = "character"
     OBJECT = "object"
-    # CHARACTER = "character"
-
 
 class Entity(Base, TimestampMixin):
     """
@@ -28,20 +26,27 @@ class Entity(Base, TimestampMixin):
     # Entity type discriminator
     type = Column(Enum(EntityType), nullable=False)
     
-    # JSON settings for entity-specific properties
-    settings = Column(JSON, nullable=True)
+    # JSON properties for entity-specific properties
+    properties = Column(JSON, nullable=True)
     
     # Foreign keys
+    world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
     zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
     
     # Discriminator column for inheritance
-    __mapper_args__ = {
-        'polymorphic_on': type,
-        'polymorphic_identity': None
-    }
+    # __mapper_args__ = {
+    #     'polymorphic_on': type,
+    #     'polymorphic_identity': None
+    # }
     
     # Relationships
     zone = relationship("Zone", back_populates="entities")
+    world = relationship("World", back_populates="entities")
+
+    character = relationship("Character", back_populates="entity")
+    object = relationship("Object", back_populates="object")
+    agent = relationship("Agent", back_populates="agent")
+    player = relationship("Player", back_populates="player")
     
     def __repr__(self):
         return f"<Entity {self.id} - {self.name} ({self.type})>"

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException, status
 
-from app.models.user import User
+from app.models.player import User
 from app.database import supabase
 
 

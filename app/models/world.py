@@ -16,28 +16,32 @@ class World(Base, TimestampMixin):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     
-    # JSON settings for world configuration
-    settings = Column(JSON, nullable=True)
+    # JSON properties for world configuration
+    properties = Column(JSON, nullable=True)
 
-    # Zone management
-    zone_limit = Column(Integer, default=100)
-    zone_limit_upgrades = Column(Integer, default=0)
+    # Zone management REPLACED BY TIER SYSTEM
+    # zone_limit = Column(Integer, default=100)
+    # zone_limit_upgrades = Column(Integer, default=0)
+
+    tier = Column(Integer, default=1)
     
     # Creator/owner of the world
-    owner_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    owner_id = Column(String(36), ForeignKey("players.id"), nullable=True)
     
     # Relationships
-    owner = relationship("User", back_populates="owned_worlds", foreign_keys=[owner_id])
+    owner = relationship("Player", back_populates="owned_worlds", foreign_keys=[owner_id])
+
     zones = relationship("Zone", back_populates="world", cascade="all, delete-orphan")
-    
-    # Optional relationships (may be kept or removed based on needs)
+    entities = relationship("Entity", back_populates="world")
     characters = relationship("Character", back_populates="world")
-    conversations = relationship("Conversation", back_populates="world")
-    
+    objects = relationship("Object", back_populates="world")
+    agents = relationship("Agent", back_populates="world")
+    players = relationship("Player", back_populates="world")
+
     def __repr__(self):
         return f"<World {self.id} - {self.name}>"
     
-    @property
-    def total_zone_limit(self):
-        """Calculate total zone limit with upgrades"""
-        return self.zone_limit + (self.zone_limit_upgrades * 100)
+    # @property
+    # def total_zone_limit(self):
+    #     """Calculate total zone limit with upgrades"""
+    #     return self.zone_limit + (self.zone_limit_upgrades * 100)

@@ -12,7 +12,7 @@ from app.services.conversation_service import ConversationService
 from app.services.character_service import CharacterService
 from app.services.agent_service import AgentService
 from app.services.usage_service import UsageService
-from app.models.user import User
+from app.models.player import User
 from app.models.conversation import Conversation
 
 router = APIRouter()

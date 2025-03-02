@@ -5,7 +5,7 @@ from functools import wraps
 from typing import Callable, Type
 
 from app.database import get_db
-from app.models.user import User
+from app.models.player import User
 from app.api.auth import get_current_user
 from app.services.payment_service import PaymentService
 from app.services.usage_service import UsageService
