@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 import logging
-from typing import List
+from typing import List, Dict, Any, Optional
 
 from app.database import SessionLocal, engine, Base
 from app.models.character import Character, CharacterType
@@ -111,11 +111,11 @@ def seed_default_agents(db: Session) -> List[Agent]:
 def seed_character_templates(db: Session) -> List[Character]:
     """Seed the database with character templates"""
     
-    # Check if templates already exist
-    existing_templates = db.query(Character).filter(Character.is_template == True).all()
-    if existing_templates:
-        logger.info(f"Found {len(existing_templates)} existing character templates")
-        return existing_templates
+    # Check if templates already exist - checking for template-like data in properties
+    template_characters = db.query(Character).filter(Character.description.like("%template%")).all()
+    if template_characters:
+        logger.info(f"Found {len(template_characters)} existing character templates")
+        return template_characters
     
     # Create character templates
     templates = []
@@ -154,10 +154,7 @@ def seed_character_templates(db: Session) -> List[Character]:
     db.flush()
     
     # Paladin template
-    paladin = Character(
-        name="Sir Aldric the Valiant",
-        description="A noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent.",
-        template="""
+    paladin_template = """
 You are Sir Aldric the Valiant, a noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent. You uphold the highest ideals of righteousness, always speaking with eloquence, wisdom, and unwavering morality. Your speech is formal, respectful, and infused with a sense of duty and virtue.
 
 ### Role and Speech Guidelines:
@@ -180,20 +177,24 @@ Example Translations:
   → "Fear not, for I shall lend thee my strength! No evil shall prevail while I stand!"
 
 Remain in character at all times, shaping responses as Sir Aldric would. Let honor guide your words and actions.
-""",
-        is_template=True,
-        is_public=True,
+"""
+    
+    paladin = Character(
+        name="Sir Aldric the Valiant",
+        description="A noble and chivalrous paladin devoted to justice, honor, and the protection of the innocent.",
         type=CharacterType.PLAYER,
+        properties={
+            "is_template": True,
+            "is_public": True,
+            "template": paladin_template
+        },
         entity_id=paladin_entity.id,
         tier=1
     )
     templates.append(paladin)
     
     # Rogue template
-    rogue = Character(
-        name="Selene Nightshade",
-        description="A cunning rogue and master of stealth, deception, and quick wit.",
-        template="""
+    rogue_template = """
 You are Selene Nightshade, a cunning rogue and master of stealth, deception, and quick wit. You speak with a sly, confident, and often sarcastic tone, always keeping an air of mystery and pragmatism. Your words are sharp, playful, and calculated, but you never shy away from a well-placed threat or a bit of mischief.
 
 ### Role and Speech Guidelines:
@@ -216,20 +217,24 @@ Example Translations:
   → "Ugh, fine. But you owe me for this one. And trust me, I collect my debts."
 
 Stay in character at all times. Every word should carry Selene's cunning, charm, and roguish attitude.
-""",
-        is_template=True,
-        is_public=True,
+"""
+    
+    rogue = Character(
+        name="Selene Nightshade",
+        description="A cunning rogue and master of stealth, deception, and quick wit.",
         type=CharacterType.PLAYER,
+        properties={
+            "is_template": True,
+            "is_public": True,
+            "template": rogue_template
+        },
         entity_id=rogue_entity.id,
         tier=1
     )
     templates.append(rogue)
     
     # Mage template
-    mage = Character(
-        name="Thorne Spellweaver",
-        description="An eccentric and brilliant arcane mage with vast knowledge of the magical arts.",
-        template="""
+    mage_template = """
 You are Thorne Spellweaver, an eccentric and brilliant arcane mage with vast knowledge of the magical arts. Your speech is filled with arcane terminology, scholarly references, and occasional bursts of excitement when discussing magical theory. You're thoughtful, analytical, and sometimes aloof, viewing the world through the lens of magical potential.
 
 ### Role and Speech Guidelines:
@@ -252,20 +257,24 @@ Example Translations:
   → "Ah, requiring mystical assistance? *adjusts spectacles* I have several theoretical approaches that might prove applicable to your predicament..."
 
 Every response should convey Thorne's magical expertise, intellectual curiosity, and slightly disconnected perspective on mundane matters.
-""",
-        is_template=True,
-        is_public=True,
+"""
+    
+    mage = Character(
+        name="Thorne Spellweaver",
+        description="An eccentric and brilliant arcane mage with vast knowledge of the magical arts.",
         type=CharacterType.PLAYER,
+        properties={
+            "is_template": True,
+            "is_public": True,
+            "template": mage_template
+        },
         entity_id=mage_entity.id,
         tier=1
     )
     templates.append(mage)
     
     # Barbarian template
-    barbarian = Character(
-        name="Krag Skullcrusher",
-        description="A mighty barbarian warrior from the northern mountains.",
-        template="""
+    barbarian_template = """
 You are Krag Skullcrusher, a mighty barbarian warrior from the northern mountains. Your speech is direct, blunt, and often loud, with simple sentence structure and forceful expressions. You value strength, courage, and loyalty above all, and have little patience for weakness or complicated plans.
 
 ### Role and Speech Guidelines:
@@ -288,10 +297,17 @@ Example Translations:
   → "KRAG HELP! TELL KRAG WHO NEEDS SMASHING! POINT WAY TO BATTLE!"
 
 Each response should emphasize Krag's physical strength, direct approach to problems, and tribal warrior worldview. Use occasional third-person self-reference for emphasis.
-""",
-        is_template=True,
-        is_public=True,
+"""
+    
+    barbarian = Character(
+        name="Krag Skullcrusher",
+        description="A mighty barbarian warrior from the northern mountains.",
         type=CharacterType.PLAYER,
+        properties={
+            "is_template": True,
+            "is_public": True,
+            "template": barbarian_template
+        },
         entity_id=barbarian_entity.id,
         tier=1
     )
@@ -334,24 +350,21 @@ def seed_worlds(db: Session):
         World(
             name="Fantasy World",
             description="A magical world filled with fantasy creatures and landscapes",
-            genre="Fantasy",
-            settings={"theme": "medieval", "magic_level": "high"},
+            properties={"theme": "medieval", "magic_level": "high", "genre": "Fantasy"},
             tier=1,
             owner_id=admin.id
         ),
         World(
             name="Sci-Fi Universe",
             description="A futuristic universe with advanced technology and space exploration",
-            genre="Science Fiction",
-            settings={"technology_level": "advanced", "space_travel": True},
+            properties={"theme": "futuristic", "technology_level": "advanced", "genre": "Science Fiction", "space_travel": True},
             tier=2,
             owner_id=admin.id
         ),
         World(
             name="Post-Apocalyptic Wasteland",
             description="A harsh world devastated by nuclear war and environmental collapse",
-            genre="Post-Apocalyptic",
-            settings={"radiation_level": "high", "survival_difficulty": "extreme"},
+            properties={"theme": "wasteland", "radiation_level": "high", "genre": "Post-Apocalyptic", "survival_difficulty": "extreme"},
             tier=1,
             owner_id=admin.id
         )
@@ -363,7 +376,8 @@ def seed_worlds(db: Session):
     db.commit()
     
     # Seed zones for these worlds
-    seed_zones()
+    seed_zones(db)
+
 
 def seed_zones(db: Session):
     """Seed the database with initial zone data"""
@@ -383,21 +397,21 @@ def seed_zones(db: Session):
                 Zone(
                     name="Enchanted Forest",
                     description="A magical forest filled with ancient trees and mystical creatures",
-                    settings={"magic_concentration": "high", "danger_level": "medium"},
+                    properties={"magic_concentration": "high", "danger_level": "medium"},
                     world_id=world.id,
                     tier=1
                 ),
                 Zone(
                     name="Royal Kingdom",
                     description="The central kingdom with a grand castle and bustling towns",
-                    settings={"population_density": "high", "technology_level": "medieval"},
+                    properties={"population_density": "high", "technology_level": "medieval"},
                     world_id=world.id,
                     tier=1
                 ),
                 Zone(
                     name="Dragon Mountains",
                     description="Treacherous mountain ranges where dragons make their lairs",
-                    settings={"elevation": "high", "danger_level": "extreme"},
+                    properties={"elevation": "high", "danger_level": "extreme"},
                     world_id=world.id,
                     tier=2
                 )
@@ -419,7 +433,7 @@ def seed_zones(db: Session):
                     Zone(
                         name="Fairy Glade",
                         description="A small clearing where fairies gather",
-                        settings={"magic_type": "nature", "size": "small"},
+                        properties={"magic_type": "nature", "size": "small"},
                         world_id=world.id,
                         parent_zone_id=enchanted_forest.id,
                         tier=1
@@ -427,7 +441,7 @@ def seed_zones(db: Session):
                     Zone(
                         name="Ancient Heart",
                         description="The oldest part of the forest with the most ancient trees",
-                        settings={"age": "ancient", "magic_concentration": "very high"},
+                        properties={"age": "ancient", "magic_concentration": "very high"},
                         world_id=world.id,
                         parent_zone_id=enchanted_forest.id,
                         tier=1
@@ -442,21 +456,21 @@ def seed_zones(db: Session):
                 Zone(
                     name="Alpha Space Station",
                     description="A massive space station serving as a hub for interstellar travel",
-                    settings={"gravity": "artificial", "population": 50000},
+                    properties={"gravity": "artificial", "population": 50000},
                     world_id=world.id,
                     tier=2
                 ),
                 Zone(
                     name="New Earth Colony",
                     description="A terraformed planet with the largest human colony outside Earth",
-                    settings={"atmosphere": "terraformed", "population": 10000000},
+                    properties={"atmosphere": "terraformed", "population": 10000000},
                     world_id=world.id,
                     tier=2
                 ),
                 Zone(
                     name="Asteroid Mining Belt",
                     description="A dangerous area of space filled with valuable mineral-rich asteroids",
-                    settings={"resources": "abundant", "danger_level": "high"},
+                    properties={"resources": "abundant", "danger_level": "high"},
                     world_id=world.id,
                     tier=1
                 )
@@ -470,21 +484,21 @@ def seed_zones(db: Session):
                 Zone(
                     name="Last City",
                     description="The last major human settlement with high walls and strict rules",
-                    settings={"security": "maximum", "resources": "limited"},
+                    properties={"security": "maximum", "resources": "limited"},
                     world_id=world.id,
                     tier=1
                 ),
                 Zone(
                     name="Radiation Zone",
                     description="A highly irradiated area filled with mutated creatures",
-                    settings={"radiation": "extreme", "mutation_risk": "high"},
+                    properties={"radiation": "extreme", "mutation_risk": "high"},
                     world_id=world.id,
                     tier=1
                 ),
                 Zone(
                     name="Abandoned Metropolis",
                     description="The ruins of a once-great city, now home to scavengers and dangers",
-                    settings={"loot_quality": "high", "structural_integrity": "low"},
+                    properties={"loot_quality": "high", "structural_integrity": "low"},
                     world_id=world.id,
                     tier=1
                 )
@@ -495,6 +509,7 @@ def seed_zones(db: Session):
     
     db.commit()
 
+
 def seed_starter_objects(db: Session) -> List[Object]:
     """Seed the database with starter objects for the zones"""
     
@@ -504,64 +519,122 @@ def seed_starter_objects(db: Session) -> List[Object]:
         logger.info(f"Found {len(existing_objects)} existing objects")
         return existing_objects
     
-    # Get fantasy world zones to add objects to
-    world = db.query(World).filter(World.name == "Eldoria").first()
+    # Get fantasy world to add objects to
+    world = db.query(World).filter(World.name == "Fantasy World").first()
     if not world:
         logger.info("Fantasy world not found, skipping object creation")
         return []
     
-    capital = db.query(Zone).filter(Zone.name == "Eldoria Capital", Zone.world_id == world.id).first()
-    merchant_district = db.query(Zone).filter(Zone.name == "Merchant District", Zone.parent_zone_id == capital.id).first()
+    # Find zones
+    enchanted_forest = db.query(Zone).filter(
+        Zone.name == "Enchanted Forest",
+        Zone.world_id == world.id
+    ).first()
     
-    if not merchant_district:
+    royal_kingdom = db.query(Zone).filter(
+        Zone.name == "Royal Kingdom",
+        Zone.world_id == world.id
+    ).first()
+    
+    if not enchanted_forest or not royal_kingdom:
         logger.info("Required zones not found, skipping object creation")
         return []
     
     # Create objects
     objects = []
     
-    # Create entities first
-    blacksmith_entity = Entity(
-        name="Blacksmith's Forge",
-        description="A busy forge where weapons and armor are crafted by a master blacksmith.",
+    # Create entities for objects
+    magical_tree_entity = Entity(
+        name="Ancient Whispering Tree",
+        description="A massive, ancient tree whose leaves shimmer with magical energy and whose bark seems to shift patterns when not directly observed.",
         type=EntityType.OBJECT,
-        tier=1
+        properties={"magic_type": "nature", "magical_properties": ["healing", "wisdom"]},
+        tier=1,
+        world_id=world.id,
+        zone_id=enchanted_forest.id
     )
     
-    tavern_entity = Entity(
-        name="The Prancing Pony",
-        description="A cozy tavern where adventurers gather to share tales and information.",
+    fountain_entity = Entity(
+        name="Mystic Fountain",
+        description="A small fountain carved from luminescent crystal that flows with water that glows softly in the moonlight.",
         type=EntityType.OBJECT,
-        tier=1
+        properties={"magic_type": "water", "magical_properties": ["healing", "clarity"]},
+        tier=1,
+        world_id=world.id,
+        zone_id=enchanted_forest.id
     )
     
-    db.add_all([blacksmith_entity, tavern_entity])
+    castle_entity = Entity(
+        name="Royal Castle",
+        description="A grand castle with towering spires and massive walls, the seat of power for the kingdom.",
+        type=EntityType.OBJECT,
+        properties={"building_type": "castle", "contains_npcs": True},
+        tier=1,
+        world_id=world.id,
+        zone_id=royal_kingdom.id
+    )
+    
+    market_entity = Entity(
+        name="Grand Market",
+        description="A bustling market square filled with vendors selling everything from exotic foods to rare magical items.",
+        type=EntityType.OBJECT,
+        properties={"building_type": "market", "contains_npcs": True},
+        tier=1,
+        world_id=world.id,
+        zone_id=royal_kingdom.id
+    )
+    
+    db.add_all([magical_tree_entity, fountain_entity, castle_entity, market_entity])
     db.flush()
     
     # Create objects with their entities
-    blacksmith = Object(
-        name="Blacksmith's Forge",
-        description="A busy forge where weapons and armor are crafted by a master blacksmith.",
+    magical_tree = Object(
+        name="Ancient Whispering Tree",
+        description="A massive, ancient tree whose leaves shimmer with magical energy and whose bark seems to shift patterns when not directly observed.",
         type=ObjectType.GENERIC,
-        is_interactive=True,
+        properties={"is_interactive": True, "magic_type": "nature", "magical_properties": ["healing", "wisdom"]},
         world_id=world.id,
-        zone_id=merchant_district.id,
-        entity_id=blacksmith_entity.id,
+        zone_id=enchanted_forest.id,
+        entity_id=magical_tree_entity.id,
         tier=1
     )
-    objects.append(blacksmith)
+    objects.append(magical_tree)
     
-    tavern = Object(
-        name="The Prancing Pony",
-        description="A cozy tavern where adventurers gather to share tales and information.",
+    fountain = Object(
+        name="Mystic Fountain",
+        description="A small fountain carved from luminescent crystal that flows with water that glows softly in the moonlight.",
         type=ObjectType.GENERIC,
-        is_interactive=True,
+        properties={"is_interactive": True, "magic_type": "water", "magical_properties": ["healing", "clarity"]},
         world_id=world.id,
-        zone_id=merchant_district.id,
-        entity_id=tavern_entity.id,
+        zone_id=enchanted_forest.id,
+        entity_id=fountain_entity.id,
         tier=1
     )
-    objects.append(tavern)
+    objects.append(fountain)
+    
+    castle = Object(
+        name="Royal Castle",
+        description="A grand castle with towering spires and massive walls, the seat of power for the kingdom.",
+        type=ObjectType.GENERIC,
+        properties={"is_interactive": True, "building_type": "castle", "contains_npcs": True},
+        world_id=world.id,
+        zone_id=royal_kingdom.id,
+        entity_id=castle_entity.id,
+        tier=1
+    )
+    objects.append(castle)
+    
+    market = Object(
+        name="Grand Market",
+        description="A bustling market square filled with vendors selling everything from exotic foods to rare magical items.",
+        type=ObjectType.GENERIC,
+        properties={"is_interactive": True, "building_type": "market", "contains_npcs": True},
+        world_id=world.id,
+        zone_id=royal_kingdom.id,
+        entity_id=market_entity.id,
+        tier=1
+    )
+    objects.append(market)
     
     # Add objects to database
     for obj in objects:

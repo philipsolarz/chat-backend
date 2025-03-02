@@ -6,9 +6,9 @@ from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 from app.config import get_settings
-from app.models.player import User
+from app.models.player import Player
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
-from app.services.player_service import UserService
+from app.services.player_service import PlayerService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -22,7 +22,7 @@ class PaymentService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.user_service = UserService(db)
+        self.user_service = PlayerService(db)
     
     def get_subscription_plans(self) -> List[SubscriptionPlan]:
         """Get all available subscription plans"""
@@ -1311,3 +1311,272 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error handling entity tier upgrade checkout: {str(e)}")
             return None
+        
+    def _get_or_create_customer(self, user) -> str:
+        """
+        Get or create a Stripe customer for a user
+        
+        Args:
+            user: User object
+            
+        Returns:
+            Stripe customer ID
+        """
+        # Check if user already has a Stripe customer ID
+        stripe_customer_id = None
+        existing_subscription = self.get_user_subscription(user.id)
+        
+        if existing_subscription and existing_subscription.stripe_customer_id:
+            stripe_customer_id = existing_subscription.stripe_customer_id
+        
+        # Create a new Stripe customer if needed
+        if not stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=user.email,
+                name=user.display_name,
+                metadata={"user_id": user.id}
+            )
+            stripe_customer_id = customer.id
+            
+        return stripe_customer_id
+
+    def _verify_entity_ownership(self, entity, user_id: str) -> None:
+        """
+        Verify that a user has ownership rights to an entity
+        Raises ValueError if not authorized
+        
+        Args:
+            entity: Entity object
+            user_id: User ID
+        """
+        # Verify ownership - this requires checking world ownership
+        world_id = entity.world_id
+        zone_id = entity.zone_id
+        
+        from app.services.world_service import WorldService
+        world_service = WorldService(self.db)
+        
+        # If entity has a world ID, check ownership directly
+        if world_id:
+            world = world_service.get_world(world_id)
+            if not world or world.owner_id != user_id:
+                raise ValueError("Only the world owner can purchase entity tier upgrades")
+        
+        # If entity has a zone ID, get the world from the zone and check ownership
+        elif zone_id:
+            from app.services.zone_service import ZoneService
+            zone_service = ZoneService(self.db)
+            
+            zone = zone_service.get_zone(zone_id)
+            if not zone:
+                raise ValueError("Zone not found")
+                
+            world = world_service.get_world(zone.world_id)
+            if not world or world.owner_id != user_id:
+                raise ValueError("Only the world owner can purchase entity tier upgrades")
+        else:
+            raise ValueError("Entity does not belong to any world or zone")
+
+    def create_tier_upgrade_checkout_base(
+        self,
+        user_id: str,
+        resource_id: str,
+        resource_type: str,
+        resource_name: str,
+        success_url: str,
+        cancel_url: str,
+        price: float
+    ) -> str:
+        """
+        Base function for creating tier upgrade checkout sessions
+        
+        Args:
+            user_id: User ID
+            resource_id: ID of the resource being upgraded
+            resource_type: Type of resource ("entity", "character", "object", etc.)
+            resource_name: Name of the resource for display
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD
+            
+        Returns:
+            Checkout session URL
+        """
+        # Get user
+        user = self.user_service.get_user(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        # Stripe customer handling
+        stripe_customer_id = self._get_or_create_customer(user)
+        
+        # Create price object
+        price_obj = stripe.Price.create(
+            unit_amount=int(price * 100),  # Convert to cents
+            currency="usd",
+            product_data={
+                "name": f"{resource_type.capitalize()} Tier Upgrade: {resource_name}",
+                "description": f"Upgrade {resource_type} tier to unlock more capabilities"
+            }
+        )
+        
+        # Create checkout session
+        checkout_session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_obj.id, "quantity": 1}],
+            mode="payment",
+            success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": user_id,
+                "product_type": f"{resource_type}_tier_upgrade",
+                f"{resource_type}_id": resource_id
+            }
+        )
+        
+        return checkout_session.url
+
+    def create_entity_tier_upgrade_checkout(
+        self, 
+        user_id: str,
+        entity_id: str,
+        success_url: str, 
+        cancel_url: str,
+        price: float = 4.99
+    ) -> str:
+        """
+        Create a Stripe checkout session for entity tier upgrade
+        
+        Args:
+            user_id: User ID
+            entity_id: ID of the entity to upgrade
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD
+            
+        Returns:
+            Checkout session URL
+        """
+        # Verify entity exists and user has permission
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(self.db)
+        
+        entity = entity_service.get_entity(entity_id)
+        if not entity:
+            raise ValueError("Entity not found")
+        
+        # Verify ownership
+        self._verify_entity_ownership(entity, user_id)
+        
+        # Create checkout using base function
+        return self.create_tier_upgrade_checkout_base(
+            user_id=user_id,
+            resource_id=entity_id,
+            resource_type="entity",
+            resource_name=entity.name,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            price=price
+        )
+
+    def create_character_tier_upgrade_checkout(
+        self, 
+        user_id: str,
+        character_id: str,
+        success_url: str, 
+        cancel_url: str,
+        price: float = 4.99
+    ) -> str:
+        """
+        Create a checkout session for character tier upgrade
+        
+        Args:
+            user_id: User ID
+            character_id: ID of the character to upgrade
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD
+            
+        Returns:
+            Checkout session URL
+        """
+        # Verify character exists and belongs to user
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(self.db)
+        
+        character = character_service.get_character(character_id)
+        if not character:
+            raise ValueError("Character not found")
+        
+        if character.player_id != user_id:
+            raise ValueError("You can only upgrade your own characters")
+        
+        if not character.entity_id:
+            raise ValueError("Character cannot be upgraded (no associated entity)")
+        
+        # Create checkout using base function
+        return self.create_tier_upgrade_checkout_base(
+            user_id=user_id,
+            resource_id=character_id,
+            resource_type="character",
+            resource_name=character.name,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            price=price
+        )
+
+    def create_object_tier_upgrade_checkout(
+        self, 
+        user_id: str,
+        object_id: str,
+        success_url: str, 
+        cancel_url: str,
+        price: float = 4.99
+    ) -> str:
+        """
+        Create a checkout session for object tier upgrade
+        
+        Args:
+            user_id: User ID
+            object_id: ID of the object to upgrade
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect if payment is canceled
+            price: Price in USD
+            
+        Returns:
+            Checkout session URL
+        """
+        # Verify object exists
+        from app.services.object_service import ObjectService
+        object_service = ObjectService(self.db)
+        
+        obj = object_service.get_object(object_id)
+        if not obj:
+            raise ValueError("Object not found")
+        
+        # Verify ownership by checking entity
+        if not obj.entity_id:
+            raise ValueError("Object cannot be upgraded (no associated entity)")
+        
+        # Get the entity to verify ownership
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(self.db)
+        
+        entity = entity_service.get_entity(obj.entity_id)
+        if not entity:
+            raise ValueError("Object's entity not found")
+        
+        # Verify ownership
+        self._verify_entity_ownership(entity, user_id)
+        
+        # Create checkout using base function
+        return self.create_tier_upgrade_checkout_base(
+            user_id=user_id,
+            resource_id=object_id,
+            resource_type="object",
+            resource_name=obj.name,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            price=price
+        )
