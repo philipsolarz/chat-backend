@@ -182,3 +182,96 @@ class CharacterResponse(CharacterBase, EntityResponse):
 
 class CharacterList(PaginatedResponse):
     items: List[CharacterResponse]
+
+# Game Event schemas
+class EventParticipantBase(BaseModel):
+    """Schema for event participants"""
+    character_id: str
+    is_read: bool = False
+
+
+class EventParticipantResponse(EventParticipantBase):
+    """Response schema for event participants"""
+    event_id: str
+    id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GameEventBase(BaseModel):
+    """Base schema for game events"""
+    type: str
+    data: Dict[str, Any]
+    character_id: Optional[str] = None
+    zone_id: Optional[str] = None
+    world_id: Optional[str] = None
+    target_entity_id: Optional[str] = None
+    scope: str = "public"
+
+
+class GameEventCreate(GameEventBase):
+    """Schema for creating a game event"""
+    participant_ids: Optional[List[str]] = None
+
+
+class GameEventResponse(GameEventBase):
+    """Response schema for game events"""
+    id: str
+    created_at: datetime
+    participants: Optional[List[EventParticipantResponse]] = None
+    
+    # Additional fields populated based on relationships
+    character_name: Optional[str] = None
+    target_entity_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MessageEventCreate(BaseModel):
+    """Schema for creating a message event"""
+    content: str
+    character_id: str
+    zone_id: Optional[str] = None
+    world_id: Optional[str] = None
+    target_character_id: Optional[str] = None
+    scope: str = "public"
+
+
+class ZoneEventsRequest(BaseModel):
+    """Schema for requesting zone events"""
+    character_id: str
+    event_types: Optional[List[str]] = None
+    limit: int = 50
+    before: Optional[datetime] = None
+
+
+class PrivateEventsRequest(BaseModel):
+    """Schema for requesting private events"""
+    character_id: str
+    other_character_id: Optional[str] = None
+    event_types: Optional[List[str]] = None
+    limit: int = 50
+    before: Optional[datetime] = None
+
+
+class MarkEventReadRequest(BaseModel):
+    """Schema for marking an event as read"""
+    character_id: str
+
+
+class UnreadCountResponse(BaseModel):
+    """Schema for unread event count response"""
+    character_id: str
+    unread_count: int
+
+
+class ConversationSummary(BaseModel):
+    """Schema for conversation summary"""
+    character_id: str
+    character_name: str
+    latest_message: str
+    latest_timestamp: datetime
+    unread_count: int

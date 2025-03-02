@@ -13,7 +13,7 @@ from app.services.usage_service import UsageService
 from app.services.world_service import WorldService
 from app.services.zone_service import ZoneService
 from app.services.payment_service import PaymentService
-from app.models.player import User
+from app.models.player import Player as User
 from app.models.character import Character, CharacterType
 
 router = APIRouter()

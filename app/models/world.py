@@ -34,6 +34,8 @@ class World(Base, TimestampMixin):
     agents = relationship("Agent", back_populates="world")
     players = relationship("Player", back_populates="world")
 
+    events = relationship("GameEvent", back_populates="world", cascade="all, delete-orphan")
+
     def __repr__(self):
         return f"<World {self.id} - {self.name}>"
     

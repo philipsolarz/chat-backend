@@ -44,6 +44,9 @@ class Character(Base, TimestampMixin):
     player = relationship("Zone", back_populates="characters")
     agent = relationship("Zone", back_populates="character")
 
+    initiated_events = relationship("GameEvent", foreign_keys="GameEvent.character_id", back_populates="character")
+    event_participations = relationship("EventParticipant", back_populates="character")
+
     # Participation in conversations
     # conversation_participations = relationship(
     #     "ConversationParticipant",

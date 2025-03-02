@@ -6,7 +6,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app.database import supabase, get_db
-from app.models.player import User
+from app.models.player import Player
 from app.config import get_settings
 
 settings = get_settings()
@@ -19,7 +19,7 @@ class AuthService:
         self.db = db
         self.settings = get_settings()
     
-    def sign_up(self, email: str, password: str, first_name: Optional[str] = None, last_name: Optional[str] = None) -> Tuple[User, Dict[str, Any]]:
+    def sign_up(self, email: str, password: str, first_name: Optional[str] = None, last_name: Optional[str] = None) -> Tuple[Player, Dict[str, Any]]:
         """Register a new user with Supabase Auth and create User record"""
         try:
             # Register user with Supabase Auth
@@ -31,7 +31,7 @@ class AuthService:
             user_id = auth_response.user.id
             
             # Create user record in our database
-            db_user = User(
+            db_user = Player(
                 id=user_id,
                 email=email,
                 first_name=first_name,
@@ -65,7 +65,7 @@ class AuthService:
             
             if not user:
                 # User exists in Supabase Auth but not in our DB, create record
-                user = User(
+                user = Player(
                     id=auth_response.user.id,
                     email=email
                 )
@@ -145,13 +145,13 @@ class AuthService:
                 detail="Invalid token"
             )
     
-    def get_user_by_id(self, user_id: str) -> Optional[User]:
+    def get_user_by_id(self, user_id: str) -> Optional[Player]:
         """Get a user by ID from our database"""
-        return self.db.query(User).filter(User.id == user_id).first()
+        return self.db.query(Player).filter(Player.id == user_id).first()
     
-    def get_user_by_email(self, email: str) -> Optional[User]:
+    def get_user_by_email(self, email: str) -> Optional[Player]:
         """Get a user by email from our database"""
-        return self.db.query(User).filter(User.email == email).first()
+        return self.db.query(Player).filter(Player.email == email).first()
 
     def verify_email_token(self, token_hash: str, type: str) -> bool:
         """

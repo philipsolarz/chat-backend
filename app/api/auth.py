@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.services.auth_service import AuthService
-from app.models.player import User
+from app.models.player import Player
 
 # Setup security scheme
 security = HTTPBearer()
@@ -34,7 +34,7 @@ async def get_access_token(
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security), 
     db: Session = Depends(get_db)
-) -> User:
+) -> Player:
     """
     Dependency to get the current authenticated user from a JWT token
     Uses Supabase authentication
@@ -67,7 +67,7 @@ async def get_current_user(
                     detail="Invalid user data in token"
                 )
             
-            user = User(id=user_id, email=user_email)
+            user = Player(id=user_id, email=user_email)
             db.add(user)
             db.commit()
             db.refresh(user)

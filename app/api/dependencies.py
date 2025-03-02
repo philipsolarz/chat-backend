@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.player import User
+from app.models.player import Player
 from app.models.character import Character
 from app.models.agent import Agent
 from app.models.conversation import Conversation, ConversationParticipant
@@ -27,7 +27,7 @@ def get_service(service_class):
 
 def get_character_owner(
     character_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Player = Depends(get_current_user),
     character_service: CharacterService = Depends(get_service(CharacterService))
 ) -> Character:
     """
@@ -53,7 +53,7 @@ def get_character_owner(
 
 def get_conversation_access(
     conversation_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Player = Depends(get_current_user),
     conversation_service: ConversationService = Depends(get_service(ConversationService))
 ) -> Conversation:
     """
@@ -82,7 +82,7 @@ def get_conversation_access(
 
 def get_participant_owner(
     participant_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Player = Depends(get_current_user),
     conversation_service: ConversationService = Depends(get_service(ConversationService))
 ) -> ConversationParticipant:
     """
@@ -109,7 +109,7 @@ def get_participant_owner(
 
 def check_entity_ownership(
     entity_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Player = Depends(get_current_user),
     entity_service: EntityService = Depends(get_service(EntityService)),
     world_service: WorldService = Depends(get_service(WorldService)),
     zone_service: ZoneService = Depends(get_service(ZoneService))
@@ -163,7 +163,7 @@ def check_entity_ownership(
 
 def check_object_ownership(
     object_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Player = Depends(get_current_user),
     object_service = Depends(get_service("ObjectService")),
     world_service: WorldService = Depends(get_service(WorldService)),
     zone_service: ZoneService = Depends(get_service(ZoneService))

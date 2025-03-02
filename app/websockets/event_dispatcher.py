@@ -5,10 +5,11 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable, Awaitable
 from fastapi import WebSocket
-
-from app.services.message_service import MessageService
+from sqlalchemy.orm import Session
+from app.models.game_event import EventType, EventScope
+from app.services.event_service import EventService
 from app.services.usage_service import UsageService
-from app.ai.agent_manager import AgentManager
+from app.websockets.connection_manager import connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ async def send_usage_update(websocket: WebSocket, usage_service: UsageService, u
         "timestamp": datetime.now().isoformat()
     }
     await websocket.send_json(payload)
+
 
 class EventDispatcher:
     """Dispatches WebSocket events to appropriate handlers based on event type"""
@@ -62,7 +64,7 @@ class EventDispatcher:
                     "timestamp": datetime.now().isoformat()
                 })
 
-# Create EventHandler registry 
+
 class EventRegistry:
     """Registry for all supported event handlers"""
     
@@ -72,39 +74,63 @@ class EventRegistry:
     
     def _setup_handlers(self):
         """Register all supported event handlers"""
-        # Core chat events
+        # Core game events
         self.dispatcher.register_handler("message", self.handle_message_event)
-        self.dispatcher.register_handler("typing", self.handle_typing_event)
-        self.dispatcher.register_handler("presence", self.handle_presence_event)
-        self.dispatcher.register_handler("usage_check", self.handle_usage_check_event)
+        self.dispatcher.register_handler("movement", self.handle_movement_event)
+        self.dispatcher.register_handler("interaction", self.handle_interaction_event)
+        self.dispatcher.register_handler("emote", self.handle_emote_event)
+        
+        # System events
         self.dispatcher.register_handler("ping", self.handle_ping_event)
+        self.dispatcher.register_handler("zone_change", self.handle_zone_change_event)
         
-        # Message interaction events
-        self.dispatcher.register_handler("read", self.handle_read_event)
-        self.dispatcher.register_handler("reaction", self.handle_reaction_event)
-        self.dispatcher.register_handler("edit", self.handle_edit_event)
-        self.dispatcher.register_handler("delete", self.handle_delete_event)
+        # Usage-related events
+        self.dispatcher.register_handler("usage_check", self.handle_usage_check_event)
         
-        # RPG-style events
-        self.dispatcher.register_handler("quest_start", self.handle_quest_start_event)
-        self.dispatcher.register_handler("quest_update", self.handle_quest_update_event)
-        self.dispatcher.register_handler("quest_complete", self.handle_quest_complete_event)
+        # Additional RPG events
+        self.dispatcher.register_handler("quest", self.handle_quest_event)
         self.dispatcher.register_handler("dialog", self.handle_dialog_event)
-        self.dispatcher.register_handler("choice", self.handle_choice_event)
+        self.dispatcher.register_handler("trade", self.handle_trade_event)
+        self.dispatcher.register_handler("combat", self.handle_combat_event)
     
     async def handle_message_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        participant_id: Optional[str],
-        message_service: MessageService,
-        usage_service: UsageService,
-        agent_manager: Optional[AgentManager] = None
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
+        **kwargs
     ):
-        """Handle a chat message event with PydanticAI integration"""
-        # First check if user can send messages
+        """Handle a chat message event"""
+        # Get the user ID from the character
+        from app.database import get_db
+        from app.services.character_service import CharacterService
+        from app.services.usage_service import UsageService
+        
+        db = next(get_db())
+        character_service = CharacterService(db)
+        usage_service = UsageService(db)
+        
+        character = character_service.get_character(character_id)
+        if not character:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Character not found",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        user_id = character.player_id
+        if not user_id:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Character has no associated user",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Check message limits
         if not usage_service.can_send_message(user_id):
             await websocket.send_json({
                 "type": "error",
@@ -112,9 +138,11 @@ class EventRegistry:
                 "is_premium": usage_service.payment_service.is_premium(user_id),
                 "timestamp": datetime.now().isoformat()
             })
+            # Send updated usage info
+            await send_usage_update(websocket, usage_service, user_id)
             return
-
-        content = message_data.get("content", "").strip()
+        
+        content = event_data.get("content", "").strip()
         if not content:
             await websocket.send_json({
                 "type": "error",
@@ -122,161 +150,386 @@ class EventRegistry:
                 "timestamp": datetime.now().isoformat()
             })
             return
+        
+        # Determine scope of the message
+        scope = EventScope.PUBLIC
+        participant_ids = None
+        target_character_id = event_data.get("target_character_id")
+        
+        if target_character_id:
+            # Private message to a specific character
+            scope = EventScope.PRIVATE
+            participant_ids = [character_id, target_character_id]
+        
+        # Track usage before creating the event
+        usage_service.track_message_sent(user_id, is_from_ai=False)
+        
+        # Create the message event
+        event = event_service.create_message_event(
+            content=content,
+            character_id=character_id,
+            zone_id=zone_id if scope == EventScope.PUBLIC else None,
+            scope=scope,
+            target_character_id=target_character_id,
+            participant_ids=participant_ids
+        )
+        
+        # Get character info for display
+        character_name = character.name
+        
+        # Format the event for broadcasting
+        event_payload = {
+            "type": "game_event",
+            "event_type": "message",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "content": content,
+            "zone_id": zone_id if scope == EventScope.PUBLIC else None,
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        if scope == EventScope.PUBLIC:
+            # Broadcast to the entire zone
+            await connection_manager.broadcast_to_zone(
+                zone_id, 
+                event_payload,
+                exclude_character_id=character_id
+            )
+        else:
+            # Send to the target character
+            await connection_manager.send_to_character(
+                target_character_id,
+                event_payload
+            )
             
-        # Get participant info to retrieve character for transformation
-        from app.services.conversation_service import ConversationService
-        from app.database import get_db
+        # Send confirmation to sender
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "message",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
         
-        conversation_service = ConversationService(next(get_db()))
-        participant = conversation_service.get_participant(participant_id)
+        # Send updated usage info
+        await send_usage_update(websocket, usage_service, user_id)
         
-        if not participant:
+        # If this is an AI agent, process AI responses
+        if scope == EventScope.PUBLIC:
+            # Check for AI agents in the zone that might respond
+            from app.ai.agent_manager import AgentManager
+            agent_manager = AgentManager(db)
+            
+            # Process AI responses in the background
+            asyncio.create_task(self.process_ai_responses(
+                agent_manager=agent_manager,
+                event=event,
+                user_id=user_id,
+                usage_service=usage_service
+            ))
+    
+    async def process_ai_responses(
+        self,
+        agent_manager,
+        event,
+        user_id,
+        usage_service
+    ):
+        """Process AI agent responses for an event"""
+        try:
+            # This would be adapted to work with the new event system
+            responses = await agent_manager.process_event(event)
+            
+            # Track AI responses in usage
+            for response in responses:
+                usage_service.track_message_sent(user_id, is_from_ai=True)
+                
+            logger.info(f"Generated {len(responses)} AI responses for event {event.id}")
+        except Exception as e:
+            logger.error(f"Error processing AI responses: {str(e)}")
+    
+    async def handle_movement_event(
+        self,
+        websocket: WebSocket,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
+        **kwargs
+    ):
+        """Handle a character movement event between zones"""
+        # Extract movement data
+        from_zone_id = zone_id  # Current zone
+        to_zone_id = event_data.get("to_zone_id")
+        
+        if not to_zone_id:
             await websocket.send_json({
                 "type": "error",
-                "error": "Participant not found",
+                "error": "Movement requires to_zone_id",
                 "timestamp": datetime.now().isoformat()
             })
             return
         
-        # Apply character voice transformation using PydanticAI
-        transformed_content = content
-        if agent_manager and participant.character_id:
-            try:
-                # Use the PydanticAI-based transformation
-                transformed_content = await agent_manager.transform_message(content, participant.character_id)
-                if not transformed_content:
-                    transformed_content = content  # Fallback if transformation fails
-                    
-                # Track transformation attempt in logs
-                logger.info(f"PydanticAI transformation applied: '{content}' -> '{transformed_content}'")
-                
-            except Exception as e:
-                logger.error(f"Error during PydanticAI message transformation: {str(e)}")
-                # Continue with original content if transformation fails
+        # Verify the destination zone exists
+        from app.services.zone_service import ZoneService
+        zone_service = ZoneService(event_service.db)
         
-        # Track message in usage service
-        usage_service.track_message_sent(user_id, is_from_ai=False)
-        
-        # Create the message with transformed content
-        db_message = message_service.create_message(
-            conversation_id=conversation_id,
-            participant_id=participant_id,
-            content=transformed_content
-        )
-        
-        if db_message:
-            sender_info = message_service.get_sender_info(db_message)
-            message_payload = {
-                "type": "message",
-                "message": {
-                    "id": db_message.id,
-                    "content": db_message.content,
-                    "participant_id": participant_id,
-                    "character_id": sender_info.get("character_id"),
-                    "character_name": sender_info.get("character_name"),
-                    "user_id": sender_info.get("user_id"),
-                    "is_ai": sender_info.get("is_ai"),
-                    "conversation_id": conversation_id,
-                    "created_at": db_message.created_at.isoformat()
-                },
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            from app.websockets.connection_manager import connection_manager
-            await connection_manager.broadcast_to_conversation(conversation_id, message_payload)
-            await send_usage_update(websocket, usage_service, user_id)
-            
-            # Process AI agent responses in the background using PydanticAI
-            if agent_manager:
-                # Make sure to call the method with self
-                asyncio.create_task(self.process_ai_responses(
-                    agent_manager=agent_manager, 
-                    conversation_id=conversation_id,
-                    participant_id=participant_id,
-                    user_id=user_id,
-                    usage_service=usage_service
-                ))
-        else:
+        destination_zone = zone_service.get_zone(to_zone_id)
+        if not destination_zone:
             await websocket.send_json({
                 "type": "error",
-                "error": "Failed to create message",
+                "error": "Destination zone not found",
                 "timestamp": datetime.now().isoformat()
             })
-
-    # Make process_ai_responses a method of EventRegistry
-    async def process_ai_responses(
-        self,
-        agent_manager: AgentManager,
-        conversation_id: str,
-        participant_id: str,
-        user_id: str,
-        usage_service: UsageService
-    ):
-        """Process AI agent responses in the background using PydanticAI"""
-        try:
-            # Using PydanticAI-based agent manager to generate responses
-            responses = await agent_manager.process_new_message(
-                conversation_id=conversation_id,
-                participant_id=participant_id
-            )
-            
-            # Track AI responses in usage
-            for _ in responses:
-                usage_service.track_message_sent(user_id, is_from_ai=True)
-                
-            logger.info(f"Generated {len(responses)} AI responses using PydanticAI")
-        except Exception as e:
-            logger.error(f"Error processing AI responses with PydanticAI: {str(e)}")
-    
-    async def handle_typing_event(
-        self,
-        websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        participant_id: Optional[str],
-        **kwargs
-    ):
-        """Handle a typing notification event"""
-        from app.websockets.connection_manager import connection_manager
+            return
         
-        payload = {
-            "type": "typing",
-            "user_id": user_id,
-            "participant_id": participant_id,
-            "is_typing": message_data.get("is_typing", True),
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(
-            conversation_id, payload, exclude=websocket
+        # Check if zones are connected (depends on your game rules)
+        # For now we'll assume they are, but you might want to check
+        # if the zones are adjacent or if there's a portal
+        
+        # Create the movement event
+        event = event_service.create_event(
+            type=EventType.MOVEMENT,
+            data={
+                "from_zone_id": from_zone_id,
+                "to_zone_id": to_zone_id,
+                "coordinates": event_data.get("coordinates", {})
+            },
+            character_id=character_id,
+            zone_id=to_zone_id,  # Record the event in the destination zone
+            scope=EventScope.PUBLIC
         )
+        
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
+        
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
+        
+        # Update the connection manager
+        connection_manager.move_character_to_zone(character_id, from_zone_id, to_zone_id)
+        
+        # Format the events for broadcasting
+        exit_payload = {
+            "type": "game_event",
+            "event_type": "character_left",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "from_zone_id": from_zone_id,
+            "to_zone_id": to_zone_id,
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        entry_payload = {
+            "type": "game_event",
+            "event_type": "character_entered",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "from_zone_id": from_zone_id,
+            "to_zone_id": to_zone_id,
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        # Broadcast departure to old zone
+        await connection_manager.broadcast_to_zone(
+            from_zone_id,
+            exit_payload,
+            exclude_character_id=character_id
+        )
+        
+        # Broadcast arrival to new zone
+        await connection_manager.broadcast_to_zone(
+            to_zone_id,
+            entry_payload,
+            exclude_character_id=character_id
+        )
+        
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "zone_change_confirmation",
+            "event_id": event.id,
+            "from_zone_id": from_zone_id,
+            "to_zone_id": to_zone_id,
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Send new zone data to the character
+        await send_zone_data(websocket, to_zone_id, character_id, event_service.db)
     
-    async def handle_presence_event(
+    async def handle_interaction_event(
         self,
         websocket: WebSocket,
-        conversation_id: str,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a presence request event"""
-        from app.websockets.connection_manager import connection_manager
+        """Handle a character interaction with an entity"""
+        target_entity_id = event_data.get("target_entity_id")
+        interaction_type = event_data.get("interaction_type")
         
-        active_users = connection_manager.get_active_users_in_conversation(conversation_id)
-        presence_payload = {
-            "type": "presence",
-            "active_users": list(active_users.values()),
+        if not target_entity_id or not interaction_type:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Interaction requires target_entity_id and interaction_type",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Verify the target entity exists and is in the same zone
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(event_service.db)
+        
+        entity = entity_service.get_entity(target_entity_id)
+        if not entity:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Target entity not found",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        if entity.zone_id != zone_id:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Target entity is not in your zone",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Create the interaction event
+        event = event_service.create_event(
+            type=EventType.INTERACTION,
+            data={
+                "interaction_type": interaction_type,
+                "details": event_data.get("details", {})
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            target_entity_id=target_entity_id,
+            scope=EventScope.PUBLIC
+        )
+        
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
+        
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
+        
+        # Format the event for broadcasting
+        interaction_payload = {
+            "type": "game_event",
+            "event_type": "interaction",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "target_entity_id": target_entity_id,
+            "target_entity_name": entity.name,
+            "interaction_type": interaction_type,
+            "details": event_data.get("details", {}),
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        # Broadcast to the zone
+        await connection_manager.broadcast_to_zone(
+            zone_id,
+            interaction_payload,
+            exclude_character_id=character_id
+        )
+        
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "interaction",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Process the interaction based on entity type and interaction type
+        # For now we'll just acknowledge it, but this could trigger game logic
+        interaction_result = {
+            "type": "interaction_result",
+            "event_id": event.id,
+            "interaction_type": interaction_type,
+            "target_entity_id": target_entity_id,
+            "result": "success",
+            "message": f"You interacted with {entity.name}",
             "timestamp": datetime.now().isoformat()
         }
-        await websocket.send_json(presence_payload)
+        
+        await websocket.send_json(interaction_result)
     
-    async def handle_usage_check_event(
+    async def handle_emote_event(
         self,
         websocket: WebSocket,
-        usage_service: UsageService,
-        user_id: str,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a usage check event"""
-        await send_usage_update(websocket, usage_service, user_id)
+        """Handle a character emote"""
+        emote_text = event_data.get("emote", "").strip()
+        if not emote_text:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Emote text cannot be empty",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Create the emote event
+        event = event_service.create_event(
+            type=EventType.EMOTE,
+            data={
+                "emote": emote_text
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            scope=EventScope.PUBLIC
+        )
+        
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
+        
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
+        
+        # Format the event for broadcasting
+        emote_payload = {
+            "type": "game_event",
+            "event_type": "emote",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "emote": emote_text,
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        # Broadcast to the zone
+        await connection_manager.broadcast_to_zone(
+            zone_id,
+            emote_payload,
+            exclude_character_id=character_id
+        )
+        
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "emote",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
     
     async def handle_ping_event(
         self,
@@ -289,371 +542,473 @@ class EventRegistry:
             "timestamp": datetime.now().isoformat()
         })
     
-    async def handle_read_event(
+    async def handle_usage_check_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
+        character_id: str,
         **kwargs
     ):
-        """Handle a read receipt event"""
-        message_id = message_data.get("message_id")
-        if not message_id:
+        """Handle a usage check event"""
+        # Get the user ID from the character
+        from app.database import get_db
+        from app.services.character_service import CharacterService
+        from app.services.usage_service import UsageService
+        
+        db = next(get_db())
+        character_service = CharacterService(db)
+        usage_service = UsageService(db)
+        
+        character = character_service.get_character(character_id)
+        if character and character.player_id:
+            await send_usage_update(websocket, usage_service, character.player_id)
+        else:
             await websocket.send_json({
                 "type": "error",
-                "error": "Message ID required for read receipt",
+                "error": "Could not determine user for usage check",
                 "timestamp": datetime.now().isoformat()
             })
-            return
-            
-        # Log the read receipt (optional: store in database)
-        logger.info(f"User {user_id} read message {message_id}")
-        
-        # Broadcast the read receipt
-        from app.websockets.connection_manager import connection_manager
-        
-        receipt_payload = {
-            "type": "read_receipt",
-            "message_id": message_id,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, receipt_payload)
     
-    async def handle_reaction_event(
+    async def handle_zone_change_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a message reaction event"""
-        message_id = message_data.get("message_id")
-        reaction = message_data.get("reaction")
-        
-        if not message_id or not reaction:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Message ID and reaction are required",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Log the reaction (optional: store in database)
-        logger.info(f"User {user_id} reacted to message {message_id} with {reaction}")
-        
-        # Broadcast the reaction
-        from app.websockets.connection_manager import connection_manager
-        
-        reaction_payload = {
-            "type": "reaction",
-            "message_id": message_id,
-            "reaction": reaction,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, reaction_payload)
+        """Alias for movement - handle zone change"""
+        await self.handle_movement_event(
+            websocket=websocket,
+            event_data=event_data,
+            character_id=character_id,
+            zone_id=zone_id,
+            event_service=event_service,
+            **kwargs
+        )
     
-    async def handle_edit_event(
+    async def handle_quest_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        message_service: MessageService,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a message edit event"""
-        message_id = message_data.get("message_id")
-        new_content = message_data.get("content", "").strip()
+        """Handle quest-related events"""
+        quest_action = event_data.get("quest_action")
+        quest_id = event_data.get("quest_id")
         
-        if not message_id or not new_content:
+        if not quest_action or not quest_id:
             await websocket.send_json({
                 "type": "error",
-                "error": "Message ID and new content are required",
+                "error": "Quest events require quest_action and quest_id",
                 "timestamp": datetime.now().isoformat()
             })
             return
-            
-        # Update the message
-        message = message_service.get_message(message_id)
-        if not message:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Message not found",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Check ownership (only the sender can edit)
-        sender_info = message_service.get_sender_info(message)
-        if sender_info.get("user_id") != user_id:
-            await websocket.send_json({
-                "type": "error",
-                "error": "You can only edit your own messages",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Update the message
-        updated_message = message_service.update_message(message_id, new_content)
-        if not updated_message:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Failed to update message",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Broadcast the edit
-        from app.websockets.connection_manager import connection_manager
         
-        edit_payload = {
-            "type": "message_edit",
-            "message_id": message_id,
-            "content": new_content,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, edit_payload)
-    
-    async def handle_delete_event(
-        self,
-        websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        message_service: MessageService,
-        **kwargs
-    ):
-        """Handle a message delete event"""
-        message_id = message_data.get("message_id")
+        # Create the quest event
+        event = event_service.create_event(
+            type=EventType.QUEST,
+            data={
+                "quest_id": quest_id,
+                "action": quest_action,
+                "details": event_data.get("details", {})
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            scope=EventScope.PUBLIC if quest_action in ["accept", "complete"] else EventScope.PRIVATE,
+            participant_ids=[character_id] if quest_action not in ["accept", "complete"] else None
+        )
         
-        if not message_id:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Message ID required for deletion",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Get the message
-        message = message_service.get_message(message_id)
-        if not message:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Message not found",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Check ownership (only the sender can delete)
-        sender_info = message_service.get_sender_info(message)
-        if sender_info.get("user_id") != user_id:
-            await websocket.send_json({
-                "type": "error",
-                "error": "You can only delete your own messages",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Delete the message
-        success = message_service.delete_message(message_id)
-        if not success:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Failed to delete message",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Broadcast the deletion
-        from app.websockets.connection_manager import connection_manager
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
         
-        delete_payload = {
-            "type": "message_delete",
-            "message_id": message_id,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, delete_payload)
-    
-    # RPG-style events
-    
-    async def handle_quest_start_event(
-        self,
-        websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        **kwargs
-    ):
-        """Handle a quest start event"""
-        quest_id = message_data.get("quest_id")
-        quest_details = message_data.get("quest_details", {})
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
         
-        if not quest_id:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Quest ID is required",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Log the quest start (optional: store in database)
-        logger.info(f"User {user_id} started quest {quest_id} with details {quest_details}")
-        
-        # Broadcast the quest start
-        from app.websockets.connection_manager import connection_manager
-        
+        # Format the event 
         quest_payload = {
-            "type": "quest_start",
+            "type": "game_event",
+            "event_type": "quest",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
             "quest_id": quest_id,
-            "quest_details": quest_details,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
+            "quest_action": quest_action,
+            "details": event_data.get("details", {}),
+            "timestamp": event.created_at.isoformat()
         }
-        await connection_manager.broadcast_to_conversation(conversation_id, quest_payload)
-    
-    async def handle_quest_update_event(
-        self,
-        websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        **kwargs
-    ):
-        """Handle a quest update event"""
-        quest_id = message_data.get("quest_id")
-        progress = message_data.get("progress")
         
-        if not quest_id or progress is None:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Quest ID and progress are required",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Log the quest update (optional: store in database)
-        logger.info(f"User {user_id} updated quest {quest_id} with progress {progress}")
+        # Broadcast public quest events to the zone
+        if quest_action in ["accept", "complete"]:
+            await connection_manager.broadcast_to_zone(
+                zone_id,
+                quest_payload,
+                exclude_character_id=character_id
+            )
         
-        # Broadcast the quest update
-        from app.websockets.connection_manager import connection_manager
-        
-        update_payload = {
-            "type": "quest_update",
-            "quest_id": quest_id,
-            "progress": progress,
-            "user_id": user_id,
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "quest",
+            "quest_action": quest_action,
+            "success": True,
             "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, update_payload)
-    
-    async def handle_quest_complete_event(
-        self,
-        websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
-        **kwargs
-    ):
-        """Handle a quest complete event"""
-        quest_id = message_data.get("quest_id")
-        
-        if not quest_id:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Quest ID is required",
-                "timestamp": datetime.now().isoformat()
-            })
-            return
-            
-        # Log the quest completion (optional: store in database)
-        logger.info(f"User {user_id} completed quest {quest_id}")
-        
-        # Broadcast the quest completion
-        from app.websockets.connection_manager import connection_manager
-        
-        complete_payload = {
-            "type": "quest_complete",
-            "quest_id": quest_id,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat()
-        }
-        await connection_manager.broadcast_to_conversation(conversation_id, complete_payload)
+        })
     
     async def handle_dialog_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a dialog event"""
-        dialog_id = message_data.get("dialog_id")
-        dialog_content = message_data.get("dialog_content", {})
+        """Handle dialog with NPCs or dialog choices"""
+        dialog_id = event_data.get("dialog_id")
+        target_entity_id = event_data.get("target_entity_id")
+        choice_id = event_data.get("choice_id")
         
-        if not dialog_id:
+        if not dialog_id or not target_entity_id:
             await websocket.send_json({
                 "type": "error",
-                "error": "Dialog ID is required",
+                "error": "Dialog events require dialog_id and target_entity_id",
                 "timestamp": datetime.now().isoformat()
             })
             return
-            
-        # Log the dialog (optional: store in database)
-        logger.info(f"User {user_id} initiated dialog {dialog_id} with content {dialog_content}")
         
-        # Broadcast the dialog
-        from app.websockets.connection_manager import connection_manager
+        # Create the dialog event
+        event = event_service.create_event(
+            type=EventType.INTERACTION,  # Dialog is a special kind of interaction
+            data={
+                "dialog_id": dialog_id,
+                "choice_id": choice_id,
+                "details": event_data.get("details", {})
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            target_entity_id=target_entity_id,
+            scope=EventScope.PRIVATE,
+            participant_ids=[character_id]
+        )
         
-        dialog_payload = {
-            "type": "dialog",
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "dialog",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Here you would process the dialog choice and send back the next dialog options
+        # This would typically involve NPC logic which would be specific to your game
+        
+        # For now, just send a simple acknowledgment
+        dialog_response = {
+            "type": "dialog_response",
+            "event_id": event.id,
             "dialog_id": dialog_id,
-            "dialog_content": dialog_content,
-            "user_id": user_id,
+            "choice_id": choice_id,
+            "response": {
+                "text": "This is a placeholder response. Your dialog choice has been recorded.",
+                "options": [
+                    {"id": "option1", "text": "Tell me more"},
+                    {"id": "option2", "text": "Goodbye"}
+                ]
+            },
             "timestamp": datetime.now().isoformat()
         }
-        await connection_manager.broadcast_to_conversation(conversation_id, dialog_payload)
+        
+        await websocket.send_json(dialog_response)
     
-    async def handle_choice_event(
+    async def handle_trade_event(
         self,
         websocket: WebSocket,
-        message_data: dict,
-        conversation_id: str,
-        user_id: str,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
         **kwargs
     ):
-        """Handle a choice event"""
-        choice_id = message_data.get("choice_id")
-        selection = message_data.get("selection")
+        """Handle trade events between characters"""
+        trade_action = event_data.get("trade_action")
+        target_character_id = event_data.get("target_character_id")
         
-        if not choice_id or selection is None:
+        if not trade_action or not target_character_id:
             await websocket.send_json({
                 "type": "error",
-                "error": "Choice ID and selection are required",
+                "error": "Trade events require trade_action and target_character_id",
                 "timestamp": datetime.now().isoformat()
             })
             return
-            
-        # Log the choice (optional: store in database)
-        logger.info(f"User {user_id} made choice {choice_id} with selection {selection}")
         
-        # Broadcast the choice
-        from app.websockets.connection_manager import connection_manager
+        # Verify the target character is in the same zone
+        target_character_zone = connection_manager.character_zones.get(target_character_id)
+        if target_character_zone != zone_id:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Target character is not in your zone",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
         
-        choice_payload = {
-            "type": "choice",
-            "choice_id": choice_id,
-            "selection": selection,
-            "user_id": user_id,
+        # Create the trade event
+        event = event_service.create_event(
+            type=EventType.TRADE,
+            data={
+                "trade_action": trade_action,
+                "items": event_data.get("items", []),
+                "gold": event_data.get("gold", 0)
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            scope=EventScope.PRIVATE,
+            participant_ids=[character_id, target_character_id]
+        )
+        
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
+        
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
+        
+        # Format the event for the target character
+        trade_payload = {
+            "type": "game_event",
+            "event_type": "trade",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "trade_action": trade_action,
+            "items": event_data.get("items", []),
+            "gold": event_data.get("gold", 0),
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        # Send to the target character
+        await connection_manager.send_to_character(
+            target_character_id,
+            trade_payload
+        )
+        
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "trade",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    async def handle_combat_event(
+        self,
+        websocket: WebSocket,
+        event_data: dict,
+        character_id: str,
+        zone_id: str,
+        event_service: EventService,
+        **kwargs
+    ):
+        """Handle combat actions"""
+        combat_action = event_data.get("combat_action")
+        target_entity_id = event_data.get("target_entity_id")
+        
+        if not combat_action or not target_entity_id:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Combat events require combat_action and target_entity_id",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Verify target exists and is in the same zone
+        from app.services.entity_service import EntityService
+        entity_service = EntityService(event_service.db)
+        
+        entity = entity_service.get_entity(target_entity_id)
+        if not entity:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Target entity not found",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        if entity.zone_id != zone_id:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Target entity is not in your zone",
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        
+        # Create the combat event
+        event = event_service.create_event(
+            type=EventType.COMBAT,
+            data={
+                "combat_action": combat_action,
+                "skill_id": event_data.get("skill_id"),
+                "weapon_id": event_data.get("weapon_id"),
+                "details": event_data.get("details", {})
+            },
+            character_id=character_id,
+            zone_id=zone_id,
+            target_entity_id=target_entity_id,
+            scope=EventScope.PUBLIC
+        )
+        
+        # Get character info for display
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(event_service.db)
+        
+        character = character_service.get_character(character_id)
+        character_name = character.name if character else "Unknown"
+        
+        # Format the event for broadcasting
+        combat_payload = {
+            "type": "game_event",
+            "event_type": "combat",
+            "event_id": event.id,
+            "character_id": character_id,
+            "character_name": character_name,
+            "target_entity_id": target_entity_id,
+            "target_entity_name": entity.name,
+            "combat_action": combat_action,
+            "details": event_data.get("details", {}),
+            "timestamp": event.created_at.isoformat()
+        }
+        
+        # Broadcast to the zone
+        await connection_manager.broadcast_to_zone(
+            zone_id,
+            combat_payload,
+            exclude_character_id=character_id
+        )
+        
+        # Send confirmation to the character
+        await websocket.send_json({
+            "type": "event_confirmation",
+            "event_id": event.id,
+            "event_type": "combat",
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Process the combat action and send the result
+        # This would involve combat calculations based on your game rules
+        combat_result = {
+            "type": "combat_result",
+            "event_id": event.id,
+            "combat_action": combat_action,
+            "target_entity_id": target_entity_id,
+            "result": {
+                "hit": True,  # Placeholder - would be based on actual calculations
+                "damage": 10,  # Placeholder 
+                "critical": False,
+                "effects": []
+            },
             "timestamp": datetime.now().isoformat()
         }
-        await connection_manager.broadcast_to_conversation(conversation_id, choice_payload)
+        
+        await websocket.send_json(combat_result)
+
+
+async def send_zone_data(websocket: WebSocket, zone_id: str, character_id: str, db: Session):
+    """Helper function to send zone data to a character"""
+    # Get entities in the zone
+    from app.services.entity_service import EntityService
+    from app.services.character_service import CharacterService
+    
+    entity_service = EntityService(db)
+    character_service = CharacterService(db)
+    
+    # Get characters in the zone
+    characters_in_zone = []
+    for char_id in connection_manager.get_characters_in_zone(zone_id):
+        if char_id != character_id:  # Don't include self
+            char = character_service.get_character(char_id)
+            if char:
+                characters_in_zone.append({
+                    "id": char.id,
+                    "name": char.name,
+                    "type": char.type
+                })
+    
+    # Get objects in the zone
+    entities, _, _ = entity_service.get_entities_in_zone(
+        zone_id=zone_id,
+        entity_type="object",
+        page=1,
+        page_size=100
+    )
+    
+    objects_in_zone = [{
+        "id": entity.id,
+        "name": entity.name,
+        "description": entity.description,
+        "type": entity.type
+    } for entity in entities]
+    
+    # Send the zone data
+    await websocket.send_json({
+        "type": "zone_data",
+        "zone_id": zone_id,
+        "characters": characters_in_zone,
+        "objects": objects_in_zone,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # Send recent zone messages/events
+    from app.models.game_event import EventType
+    from app.services.event_service import EventService
+    event_service = EventService(db)
+    
+    recent_events = event_service.get_zone_events(
+        zone_id=zone_id,
+        character_id=character_id,
+        event_types=[EventType.MESSAGE],
+        limit=20
+    )
+    
+    if recent_events:
+        messages = []
+        for event in recent_events:
+            # Get character information
+            sender = character_service.get_character(event.character_id) if event.character_id else None
+            
+            messages.append({
+                "event_id": event.id,
+                "content": event.data.get("content", ""),
+                "character_id": event.character_id,
+                "character_name": sender.name if sender else "System",
+                "timestamp": event.created_at.isoformat()
+            })
+        
+        # Send the recent messages
+        await websocket.send_json({
+            "type": "recent_messages",
+            "messages": messages,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    # Send usage info to the character
+    try:
+        from app.services.usage_service import UsageService
+        usage_service = UsageService(db)
+        
+        character = character_service.get_character(character_id)
+        if character and character.player_id:
+            await send_usage_update(websocket, usage_service, character.player_id)
+    except Exception as e:
+        logger.error(f"Error sending usage info: {str(e)}")
+
 
 # Create a global event registry
 event_registry = EventRegistry()

@@ -11,7 +11,7 @@ from app.services.object_service import ObjectService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
 from app.services.payment_service import PaymentService
-from app.models.player import User
+from app.models.player import Player as User
 from app.models.object import Object, ObjectType
 
 router = APIRouter()
