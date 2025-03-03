@@ -25,7 +25,7 @@ class Agent(Base, TimestampMixin):
     # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
     # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
     # entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
-    character_id = Column(String(36), ForeignKey("characters.id"), nullable=True)
+    # character_id = Column(String(36), ForeignKey("characters.id"), nullable=True)
 
     # world = relationship("World", back_populates="agents")
     # zone = relationship("Zone", back_populates="agents")

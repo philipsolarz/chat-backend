@@ -36,31 +36,24 @@ async def create_character(
     If zone_id is provided, checks if the zone has capacity for another entity.
     Returns the created character.
     """
-    # If trying to make public, check if user has premium
-    if character.is_public and not usage_service.can_make_character_public(user_with_capacity.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Making characters public is a premium feature"
-        )
-    
     # If world_id is provided, check if user has access
-    if character.world_id:
-        world = world_service.get_world(character.world_id)
+    if character.world.id:
+        world = world_service.get_world(character.world.id)
         if not world:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="World not found"
             )
         
-        if not world_service.check_user_access(user_with_capacity.id, character.world_id):
+        if not world_service.check_user_access(user_with_capacity.id, character.world.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this world"
             )
     
     # If zone_id is provided, check if zone has capacity for another entity
-    if character.zone_id:
-        zone = zone_service.get_zone(character.zone_id)
+    if character.zone.id:
+        zone = zone_service.get_zone(character.zone.id)
         if not zone:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -68,14 +61,14 @@ async def create_character(
             )
         
         # Check if world IDs match
-        if character.world_id and zone.world_id != character.world_id:
+        if character.world.id and zone.world_id != character.world.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Zone does not belong to the specified world"
             )
         
         # Check zone capacity based on tier
-        if not zone_service.can_add_entity_to_zone(character.zone_id):
+        if not zone_service.can_add_entity_to_zone(character.zone.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Zone has reached its entity limit for tier {zone.tier}. Upgrade the zone tier to add more entities."
@@ -89,8 +82,8 @@ async def create_character(
         user_id=user_with_capacity.id,
         name=character.name,
         description=character.description,
-        world_id=character.world_id,
-        zone_id=character.zone_id
+        world_id=character.world.id,
+        zone_id=character.zone.id
     )
     
     if not new_character:

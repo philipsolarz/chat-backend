@@ -186,9 +186,9 @@ class EntityService:
             description=description,
             type=entity_type,
             zone_id=zone_id,
-            world_id=world_id,
+            # world_id=world_id,
             properties=properties,
-            tier=1  # Default tier for new entities
+            # tier=1  # Default tier for new entities
         )
         
         self.db.add(entity)

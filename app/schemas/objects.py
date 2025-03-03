@@ -16,8 +16,8 @@ class ObjectBase(BaseModel):
 
 class ObjectCreate(ObjectBase):
     """Properties required to create an object"""
-    zone_id: Optional[str] = None
-    world_id: Optional[str] = None
+    # zone_id: Optional[str] = None
+    # world_id: Optional[str] = None
 
 class ObjectUpdate(BaseModel):
     """Properties that can be updated"""
@@ -28,8 +28,8 @@ class ObjectUpdate(BaseModel):
 class ObjectResponse(ObjectBase):
     """Response model with all object properties"""
     id: str
-    world_id: Optional[str] = None
-    zone_id: Optional[str] = None
+    # world_id: Optional[str] = None
+    # zone_id: Optional[str] = None
     entity_id: Optional[str] = None
     type: ObjectType
     properties: Optional[Dict[str, Any]] = None

@@ -44,7 +44,7 @@ class ObjectService:
             description=description,
             entity_type=EntityType.OBJECT,
             zone_id=zone_id,
-            world_id=world_id
+            # world_id=world_id
         )
         
         if not entity:
@@ -55,8 +55,8 @@ class ObjectService:
             name=name,
             description=description,
             type=ObjectType.GENERIC,
-            zone_id=zone_id,
-            world_id=world_id,
+            # zone_id=zone_id,
+            # world_id=world_id,
             entity_id=entity.id,
             settings=settings,
             tier=1  # Default tier for new objects
@@ -96,10 +96,10 @@ class ObjectService:
         # Apply filters if provided
         if filters:
             if 'zone_id' in filters:
-                query = query.filter(Object.zone_id == filters['zone_id'])
+                query = query.filter(Object.zone.id == filters['zone_id'])
                 
             if 'world_id' in filters:
-                query = query.filter(Object.world_id == filters['world_id'])
+                query = query.filter(Object.world.id == filters['world_id'])
             
             if 'name' in filters:
                 query = query.filter(Object.name.ilike(f"%{filters['name']}%"))

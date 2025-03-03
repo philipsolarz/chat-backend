@@ -11,8 +11,8 @@ class AgentBase(BaseModel):
 
 class AgentCreate(AgentBase):
     """Properties required to create an agent"""
-    zone_id: Optional[str] = None
-    world_id: Optional[str] = None
+    # zone_id: Optional[str] = None
+    # world_id: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
 
 class AgentUpdate(BaseModel):
@@ -24,8 +24,8 @@ class AgentUpdate(BaseModel):
 class AgentResponse(AgentBase):
     """Response model with all agent properties"""
     id: str
-    world_id: Optional[str] = None
-    zone_id: Optional[str] = None
+    # world_id: Optional[str] = None
+    # zone_id: Optional[str] = None
     entity_id: Optional[str] = None
     character_id: Optional[str] = None
     tier: int

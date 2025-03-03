@@ -22,7 +22,7 @@ class PaymentService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.user_service = PlayerService(db)
+        self.player_service = PlayerService(db)
     
     def get_subscription_plans(self) -> List[SubscriptionPlan]:
         """Get all available subscription plans"""
@@ -65,7 +65,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user and plan
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -134,7 +134,7 @@ class PaymentService:
             user_id = session.metadata.get("user_id")
             plan_id = session.metadata.get("plan_id")
             
-            user = self.user_service.get_user(user_id)
+            user = self.player_service.get_player(user_id)
             plan = self.get_plan_by_id(plan_id)
             
             if not user or not plan:
@@ -216,7 +216,7 @@ class PaymentService:
                 subscription.is_active = False
             
             # Update user premium status
-            user = self.user_service.get_user(subscription.user_id)
+            user = self.player_service.get_player(subscription.user_id)
             if user:
                 user.is_premium = subscription.is_active
             
@@ -255,7 +255,7 @@ class PaymentService:
             subscription.canceled_at = datetime.utcnow()
             
             # Update user premium status
-            user = self.user_service.get_user(subscription.user_id)
+            user = self.player_service.get_player(subscription.user_id)
             if user:
                 # Check if user has any other active subscriptions
                 has_active = self.db.query(UserSubscription).filter(
@@ -300,7 +300,7 @@ class PaymentService:
             subscription.canceled_at = datetime.utcnow()
             
             # Update user premium status
-            user = self.user_service.get_user(user_id)
+            user = self.player_service.get_player(user_id)
             if user:
                 user.is_premium = False
             
@@ -355,7 +355,7 @@ class PaymentService:
         Returns:
             True if user has premium, False otherwise
         """
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         return user is not None and user.is_premium
     
     def create_premium_world_checkout(self, 
@@ -378,7 +378,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -464,7 +464,7 @@ class PaymentService:
                 return None
             
             # Get user
-            user = self.user_service.get_user(user_id)
+            user = self.player_service.get_player(user_id)
             if not user:
                 logger.error(f"User not found: {user_id}")
                 return None
@@ -515,7 +515,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -657,7 +657,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -812,7 +812,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -958,7 +958,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -1116,7 +1116,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         
@@ -1403,7 +1403,7 @@ class PaymentService:
             Checkout session URL
         """
         # Get user
-        user = self.user_service.get_user(user_id)
+        user = self.player_service.get_player(user_id)
         if not user:
             raise ValueError("User not found")
         

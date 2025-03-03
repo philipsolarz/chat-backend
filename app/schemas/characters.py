@@ -18,8 +18,8 @@ class CharacterBase(BaseModel):
 
 class CharacterCreate(CharacterBase):
     """Properties required to create a character"""
-    world_id: str
-    zone_id: Optional[str] = None
+    # world_id: str
+    # zone_id: Optional[str] = None
     user_id: Optional[str] = None
 
 class CharacterUpdate(BaseModel):
@@ -32,8 +32,8 @@ class CharacterResponse(CharacterBase):
     """Response model with all character properties"""
     id: str
     player_id: Optional[str] = None
-    world_id: str
-    zone_id: Optional[str] = None
+    # world_id: str
+    # zone_id: Optional[str] = None
     entity_id: Optional[str] = None
     type: CharacterType
     tier: int

@@ -43,7 +43,7 @@ class CharacterService:
             description=description,
             entity_type=EntityType.CHARACTER,
             zone_id=zone_id,
-            world_id=world_id
+            # world_id=world_id
         )
         
         if not entity:
@@ -56,8 +56,8 @@ class CharacterService:
             type=CharacterType.PLAYER,  # Default to player-controlled
             entity_id=entity.id,
             player_id=user_id,
-            world_id=world_id,
-            zone_id=zone_id
+            # world_id=world_id,
+            # zone_id=zone_id
         )
         
         self.db.add(character)
@@ -103,10 +103,10 @@ class CharacterService:
                 query = query.filter(Character.description.ilike(f"%{filters['description']}%"))
 
             if 'world_id' in filters:
-                query = query.filter(Character.world_id == filters['world_id'])
+                query = query.filter(Character.world.id == filters['world_id'])
                 
             if 'zone_id' in filters:
-                query = query.filter(Character.zone_id == filters['zone_id'])
+                query = query.filter(Character.zone.id == filters['zone_id'])
             
             if 'ids' in filters and isinstance(filters['ids'], list):
                 query = query.filter(Character.id.in_(filters['ids']))

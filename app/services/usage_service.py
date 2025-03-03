@@ -116,7 +116,7 @@ class UsageService:
             
             # Calculate initial values
             character_count = self.db.query(func.count(Character.id)).filter(
-                Character.user_id == user_id
+                Character.player_id == user_id
             ).scalar() or 0
             
             conversation_count = self.db.query(func.count(func.distinct(ConversationParticipant.conversation_id))).filter(

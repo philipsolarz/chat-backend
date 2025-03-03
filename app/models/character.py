@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models.entity import Entity, EntityType
 from app.models.mixins import TimestampMixin, generate_uuid
+from app.models.player import Player
 
 class CharacterType(str, enum.Enum):
     """Types of characters"""
@@ -34,8 +35,8 @@ class Character(Base, TimestampMixin):
     # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
     # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
     entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
-    # player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
-    # agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
+    player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
+    agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
 
     # world = relationship("World", back_populates="characters")
     # zone = relationship("Zone", back_populates="characters")
