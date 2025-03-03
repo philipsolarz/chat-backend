@@ -19,11 +19,12 @@ class CharacterService:
         self.entity_service = EntityService(db)
     
     def create_character(self, 
-                         user_id: str, 
-                         name: str, 
-                         description: Optional[str] = None,
-                         zone_id: Optional[str] = None
-                         ) -> Optional[Character]:
+                        user_id: str, 
+                        name: str, 
+                        description: Optional[str] = None,
+                        zone_id: Optional[str] = None,
+                        world_id: Optional[str] = None
+                        ) -> Optional[Character]:
         """
         Create a new character.
         
@@ -31,7 +32,8 @@ class CharacterService:
             user_id: ID of the user creating the character (owner)
             name: Name of the character
             description: Description of the character (including personality)
-            zone_id: Optional zone ID to place the character in
+            zone_id: Zone ID to place the character in
+            world_id: ID of the world (for reference, not directly used here)
             
         Returns:
             Created character or None if entity creation fails (e.g., zone reached its entity limit)

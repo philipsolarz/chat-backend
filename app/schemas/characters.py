@@ -1,4 +1,4 @@
-# app/schemas/character.py
+# app/schemas/characters.py
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -18,8 +18,10 @@ class CharacterBase(BaseModel):
 class CharacterCreate(CharacterBase):
     """
     Fields required to create a character.
-    The client must pass the zone_id where the character should be created.
+    The client must pass the world_id, and optionally a zone_id.
+    If zone_id is not provided, a default starting zone will be used.
     """
+    world_id: str
     zone_id: Optional[str] = None
     user_id: Optional[str] = None  # Usually taken from auth
 
