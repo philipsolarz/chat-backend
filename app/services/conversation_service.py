@@ -1,6 +1,6 @@
 # app/services/conversation_service.py
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, or_, and_, not_
+from sqlalchemy import desc, func, or_
 from typing import List, Optional, Dict, Any, Tuple
 import math
 
@@ -20,45 +20,36 @@ class ConversationService:
     def create_conversation(self, title: Optional[str] = None) -> Conversation:
         """Create a new conversation"""
         conversation = Conversation(title=title)
-        
         self.db.add(conversation)
         self.db.commit()
         self.db.refresh(conversation)
-        
         return conversation
     
     def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Get a conversation by ID"""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_conversations(self, 
-                          filters: Dict[str, Any] = None, 
-                          page: int = 1, 
-                          page_size: int = 20, 
-                          sort_by: str = "updated_at", 
-                          sort_desc: bool = True) -> Tuple[List[Conversation], int, int]:
+    def get_conversations(
+        self, 
+        filters: Optional[Dict[str, Any]] = None, 
+        page: int = 1, 
+        page_size: int = 20, 
+        sort_by: str = "updated_at", 
+        sort_desc: bool = True
+    ) -> Tuple[List[Conversation], int, int]:
         """
         Get conversations with flexible filtering options
         
-        Args:
-            filters: Dictionary of filter conditions
-            page: Page number (starting from 1)
-            page_size: Number of records per page
-            sort_by: Field to sort by
-            sort_desc: Whether to sort in descending order
-            
         Returns:
             Tuple of (conversations, total_count, total_pages)
         """
         query = self.db.query(Conversation)
         
-        # Apply filters if provided
         if filters:
             if 'title' in filters:
                 query = query.filter(Conversation.title.ilike(f"%{filters['title']}%"))
             
             if 'character_id' in filters:
-                # Filter by character participation
                 query = query.join(
                     ConversationParticipant,
                     Conversation.id == ConversationParticipant.conversation_id
@@ -67,7 +58,6 @@ class ConversationService:
                 )
             
             if 'user_id' in filters:
-                # Filter by user participation (directly)
                 query = query.join(
                     ConversationParticipant,
                     Conversation.id == ConversationParticipant.conversation_id
@@ -76,7 +66,6 @@ class ConversationService:
                 )
             
             if 'agent_id' in filters:
-                # Filter by agent participation
                 query = query.join(
                     ConversationParticipant,
                     Conversation.id == ConversationParticipant.conversation_id
@@ -84,20 +73,14 @@ class ConversationService:
                     ConversationParticipant.agent_id == filters['agent_id']
                 )
                 
-            if 'exclude_empty' in filters and filters['exclude_empty']:
-                # Filter out conversations with no messages
+            if filters.get('exclude_empty'):
                 query = query.join(
                     Message,
                     Conversation.id == Message.conversation_id,
                     isouter=True
-                ).group_by(
-                    Conversation.id
-                ).having(
-                    func.count(Message.id) > 0
-                )
+                ).group_by(Conversation.id).having(func.count(Message.id) > 0)
                 
-            if 'search' in filters and filters['search']:
-                # Search in conversation titles and messages
+            if filters.get('search'):
                 search_term = f"%{filters['search']}%"
                 query = query.outerjoin(
                     Message,
@@ -109,24 +92,17 @@ class ConversationService:
                     )
                 ).distinct()
         
-        # Get total count before pagination
         total_count = query.distinct().count()
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Apply sorting
         if hasattr(Conversation, sort_by):
             sort_field = getattr(Conversation, sort_by)
             query = query.order_by(sort_field.desc() if sort_desc else sort_field)
         else:
-            # Default sorting by updated_at
             query = query.order_by(Conversation.updated_at.desc() if sort_desc else Conversation.updated_at)
         
-        # Apply pagination - convert page to offset
         offset = (page - 1) * page_size if page > 0 else 0
-        
-        # Get paginated results
         conversations = query.distinct().offset(offset).limit(page_size).all()
-        
         return conversations, total_count, total_pages
     
     def update_conversation(self, conversation_id: str, update_data: Dict[str, Any]) -> Optional[Conversation]:
@@ -135,14 +111,12 @@ class ConversationService:
         if not conversation:
             return None
         
-        # Update only the fields provided
         for key, value in update_data.items():
             if hasattr(conversation, key):
                 setattr(conversation, key, value)
         
         self.db.commit()
         self.db.refresh(conversation)
-        
         return conversation
     
     def delete_conversation(self, conversation_id: str) -> bool:
@@ -153,96 +127,80 @@ class ConversationService:
         
         self.db.delete(conversation)
         self.db.commit()
-        
         return True
     
-    def add_participant(self, 
-                       conversation_id: str, 
-                       character_id: str, 
-                       user_id: Optional[str] = None, 
-                       agent_id: Optional[str] = None) -> Optional[ConversationParticipant]:
+    def add_participant(
+        self, 
+        conversation_id: str, 
+        character_id: str, 
+        user_id: Optional[str] = None, 
+        agent_id: Optional[str] = None
+    ) -> Optional[ConversationParticipant]:
         """
-        Add a participant to a conversation
+        Add a participant to a conversation.
         
-        Args:
-            conversation_id: ID of the conversation
-            character_id: ID of the character to be used
-            user_id: ID of the user controlling the character (if user-controlled)
-            agent_id: ID of the agent controlling the character (if AI-controlled)
-            
-        Note: Either user_id or agent_id must be provided, but not both
+        Either user_id or agent_id must be provided (but not both).
         """
-        # Validate that only one of user_id or agent_id is provided
         if (user_id is not None and agent_id is not None) or (user_id is None and agent_id is None):
             return None
         
-        # Check if conversation exists
         conversation = self.get_conversation(conversation_id)
         if not conversation:
             return None
         
-        # Check if character exists
         character = self.db.query(Character).filter(Character.id == character_id).first()
         if not character:
             return None
         
-        # Check if user or agent exists
         if user_id:
             controller = self.db.query(User).filter(User.id == user_id).first()
             if not controller:
                 return None
-                
-            # Verify user has access to the character
-            if character.user_id != user_id and not character.is_public:
+            # Verify that the character is controlled by this user.
+            if character.player_id != user_id:
                 return None
-        else:  # agent_id is not None
+        else:  # agent_id is provided
             controller = self.db.query(Agent).filter(Agent.id == agent_id).first()
-            if not controller or not controller.is_active:
+            if not controller:
                 return None
-                
-            # Verify agent can use this character (must be public)
-            if not character.is_public:
+            # Verify that the character is controlled by this agent.
+            if character.agent_id != agent_id:
                 return None
         
-        # Check if this exact participation already exists
-        existing = self.db.query(ConversationParticipant).filter(
+        # Check if an identical participation already exists.
+        query = self.db.query(ConversationParticipant).filter(
             ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.character_id == character_id,
-            ConversationParticipant.user_id == user_id if user_id else True,
-            ConversationParticipant.agent_id == agent_id if agent_id else True
-        ).first()
-        
+            ConversationParticipant.character_id == character_id
+        )
+        if user_id:
+            query = query.filter(ConversationParticipant.user_id == user_id)
+        else:
+            query = query.filter(ConversationParticipant.agent_id == agent_id)
+        existing = query.first()
         if existing:
-            return existing  # Already participating
+            return existing
         
-        # Create new participant
         participant = ConversationParticipant(
             conversation_id=conversation_id,
             character_id=character_id,
             user_id=user_id,
             agent_id=agent_id
         )
-        
         self.db.add(participant)
         self.db.commit()
         self.db.refresh(participant)
-        
         return participant
     
     def remove_participant(self, participant_id: str) -> bool:
-        """
-        Remove a participant from a conversation by participant ID
-        """
+        """Remove a participant from a conversation by participant ID"""
         participant = self.db.query(ConversationParticipant).filter(
             ConversationParticipant.id == participant_id
         ).first()
-        
         if not participant:
             return False
         
         self.db.delete(participant)
         self.db.commit()
-        
         return True
     
     def get_participant(self, participant_id: str) -> Optional[ConversationParticipant]:
@@ -253,14 +211,9 @@ class ConversationService:
     
     def get_participants(self, conversation_id: str) -> List[Dict[str, Any]]:
         """
-        Get all participants in a conversation with detailed information
+        Get all participants in a conversation with detailed information.
         
-        Returns list of dicts with:
-        - participant_id
-        - character (obj)
-        - user (obj, if user-controlled)
-        - agent (obj, if agent-controlled)
-        - type ('user' or 'agent')
+        Returns list of dicts with participant details.
         """
         participants = self.db.query(ConversationParticipant).filter(
             ConversationParticipant.conversation_id == conversation_id
@@ -278,15 +231,8 @@ class ConversationService:
                 "character": p.character,
                 "user": p.user,
                 "agent": p.agent,
-                "type": "user" if p.user_id else "agent"  # Keep this for additional context
+                "type": "user" if p.user_id else "agent"
             }
-            # participant_info = {
-            #     "participant_id": p.id,
-            #     "character": p.character,
-            #     "user": p.user,
-            #     "agent": p.agent,
-            #     "type": "user" if p.user_id else "agent"
-            # }
             result.append(participant_info)
             
         return result
@@ -307,7 +253,6 @@ class ConversationService:
                 "type": "user"
             }
             result.append(participant_info)
-            
         return result
     
     def get_agent_participants(self, conversation_id: str) -> List[Dict[str, Any]]:
@@ -326,15 +271,16 @@ class ConversationService:
                 "type": "agent"
             }
             result.append(participant_info)
-            
         return result
     
-    def get_user_conversations(self, 
-                              user_id: str, 
-                              page: int = 1, 
-                              page_size: int = 20, 
-                              sort_by: str = "updated_at",
-                              sort_desc: bool = True) -> Tuple[List[Conversation], int, int]:
+    def get_user_conversations(
+        self, 
+        user_id: str, 
+        page: int = 1, 
+        page_size: int = 20, 
+        sort_by: str = "updated_at",
+        sort_desc: bool = True
+    ) -> Tuple[List[Conversation], int, int]:
         """Get all conversations where a user is participating"""
         return self.get_conversations(
             filters={'user_id': user_id},
@@ -346,58 +292,43 @@ class ConversationService:
     
     def get_recent_conversations(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Get recent conversations for a user with the most recent message
-        Returns conversations in order of latest activity
+        Get recent conversations for a user with the most recent message.
+        
+        Returns conversations sorted by latest activity.
         """
-        # Get user's participants
         user_participants = self.db.query(ConversationParticipant).filter(
             ConversationParticipant.user_id == user_id
         ).all()
         
         conversation_ids = [p.conversation_id for p in user_participants]
-        
         if not conversation_ids:
             return []
         
-        # Get conversations with latest message
         conversations = self.db.query(Conversation).filter(
             Conversation.id.in_(conversation_ids)
         ).all()
         
         result = []
         for conversation in conversations:
-            # Get the latest message
             latest_message = self.db.query(Message).filter(
                 Message.conversation_id == conversation.id
             ).order_by(desc(Message.created_at)).first()
-            
-            # Get participants count
             participants_count = self.db.query(ConversationParticipant).filter(
                 ConversationParticipant.conversation_id == conversation.id
             ).count()
-            
-            # Get user participants count
             user_participants_count = self.db.query(ConversationParticipant).filter(
                 ConversationParticipant.conversation_id == conversation.id,
                 ConversationParticipant.user_id.isnot(None)
             ).count()
-            
-            # Get agent participants count
             agent_participants_count = self.db.query(ConversationParticipant).filter(
                 ConversationParticipant.conversation_id == conversation.id,
                 ConversationParticipant.agent_id.isnot(None)
             ).count()
-            
-            # Get sender info if message exists
             sender_name = None
             if latest_message:
                 participant = self.get_participant(latest_message.participant_id)
                 if participant:
-                    if participant.user_id:
-                        sender_name = participant.character.name
-                    else:  # agent
-                        sender_name = f"{participant.character.name} (AI)"
-            
+                    sender_name = participant.character.name if participant.user_id else f"{participant.character.name} (AI)"
             result.append({
                 "id": conversation.id,
                 "title": conversation.title,
@@ -411,23 +342,18 @@ class ConversationService:
                 "updated_at": conversation.updated_at
             })
         
-        # Sort by latest activity
         result.sort(key=lambda x: x["latest_message_time"], reverse=True)
         return result[:limit]
     
     def search_conversations(self, user_id: str, query: str, limit: int = 10) -> List[Conversation]:
         """Search for conversations by title or message content that the user has access to"""
-        # Get user's participants
         user_participants = self.db.query(ConversationParticipant).filter(
             ConversationParticipant.user_id == user_id
         ).all()
-        
         conversation_ids = [p.conversation_id for p in user_participants]
-        
         if not conversation_ids:
             return []
         
-        # Search in conversations
         return self.db.query(Conversation).outerjoin(
             Message,
             Conversation.id == Message.conversation_id

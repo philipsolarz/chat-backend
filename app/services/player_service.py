@@ -6,7 +6,6 @@ from fastapi import HTTPException, status
 from app.models.player import Player
 from app.database import supabase
 
-
 class PlayerService:
     """Service for handling player operations (renamed from UserService)"""
     
@@ -21,7 +20,13 @@ class PlayerService:
         """Get a player by email"""
         return self.db.query(Player).filter(Player.email == email).first()
     
-    def create_player(self, player_id: str, email: str, first_name: Optional[str] = None, last_name: Optional[str] = None) -> Player:
+    def create_player(
+        self, 
+        player_id: str, 
+        email: str, 
+        first_name: Optional[str] = None, 
+        last_name: Optional[str] = None
+    ) -> Player:
         """
         Create a player in our database (should be called after Supabase Auth registration)
         """
@@ -73,8 +78,7 @@ class PlayerService:
             self.db.delete(player)
             self.db.commit()
             
-            # Delete from Supabase Auth
-            # Note: This will require admin privileges in Supabase
+            # Delete from Supabase Auth (requires admin privileges)
             supabase.auth.admin.delete_user(player_id)
             
             return True
@@ -96,7 +100,7 @@ class PlayerService:
         
     def get_player_stats(self, player_id: str) -> Dict[str, Any]:
         """
-        Get statistics about a player's activity
+        Get statistics about a player's activity.
         
         Returns counts of characters, worlds, etc.
         """
@@ -108,7 +112,7 @@ class PlayerService:
                 "is_premium": False
             }
         
-        # Count characters
+        # Count characters controlled by the player
         from app.models.character import Character
         character_count = self.db.query(Character).filter(
             Character.player_id == player_id

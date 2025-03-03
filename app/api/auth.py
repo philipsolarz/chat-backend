@@ -21,7 +21,7 @@ async def get_access_token(
     """
     auth_service = AuthService(db)
     try:
-        # Verify token with your auth service; if invalid, this should raise an exception.
+        # Verify token; if invalid, an exception will be raised.
         auth_service.verify_token(credentials.credentials)
     except Exception as e:
         raise HTTPException(
@@ -36,16 +36,16 @@ async def get_current_user(
     db: Session = Depends(get_db)
 ) -> Player:
     """
-    Dependency to get the current authenticated user from a JWT token
-    Uses Supabase authentication
+    Dependency to get the current authenticated user from a JWT token.
+    Uses Supabase authentication.
     """
     auth_service = AuthService(db)
     
     try:
-        # Verify token with Supabase
+        # Verify token using AuthService
         payload = auth_service.verify_token(credentials.credentials)
         
-        # Extract user ID
+        # Extract user ID from payload
         user_id = payload.get("sub")
         
         if not user_id:
@@ -54,12 +54,12 @@ async def get_current_user(
                 detail="Invalid authentication credentials"
             )
         
-        # Get user from database
+        # Retrieve user from database
         user = auth_service.get_user_by_id(user_id)
         
         if not user:
-            # Create user record if it doesn't exist but token is valid
-            # This can happen if the user was created through Supabase Auth but not in our DB
+            # Create the user record if it doesn't exist,
+            # which can occur if the user exists in Supabase but not locally.
             user_email = payload.get("email")
             if not user_email:
                 raise HTTPException(

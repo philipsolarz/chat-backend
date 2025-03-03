@@ -1,59 +1,30 @@
 # app/models/character.py
-import enum
-from sqlalchemy import JSON, Column, Integer, String, Text, ForeignKey, Boolean, Enum
+from sqlalchemy import Column, JSON, String, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import relationship
-
 from app.database import Base
-from app.models.entity import Entity, EntityType
-from app.models.mixins import TimestampMixin, generate_uuid
-from app.models.player import Player
+from app.models.mixins import TimestampMixin
+from app.models.entity import Entity
+from app.models.enums import CharacterType
 
-class CharacterType(str, enum.Enum):
-    """Types of characters"""
-    PLAYER = "player"
-    AGENT = "agent"
-
-class Character(Base, TimestampMixin):
-    """
-    Model representing characters in the system
-    Characters can be controlled by players or agents.
-    """
-
+class Character(Entity):
     __tablename__ = "characters"
+    id = Column(String(36), ForeignKey("entities.id"), primary_key=True)
     
-    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-
-    type = Column(Enum(CharacterType), nullable=False)
-    
-    # JSON settings for object-specific properties
+    character_type = Column(SAEnum(CharacterType), nullable=False)
     settings = Column(JSON, nullable=True)
-    
-    tier = Column(Integer, default=1)
-
-    # world_id = Column(String(36), ForeignKey("worlds.id"), nullable=True)
-    # zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
-    entity_id = Column(String(36), ForeignKey("entities.id"), nullable=True)
     player_id = Column(String(36), ForeignKey("players.id"), nullable=True)
     agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
-
-    # world = relationship("World", back_populates="characters")
-    # zone = relationship("Zone", back_populates="characters")
-    entity = relationship("Entity", back_populates="character")
-
+    
+    # Relationships
     player = relationship("Player", back_populates="character")
-    agent = relationship("Agent", back_populates="character")
-
-    initiated_events = relationship("GameEvent", foreign_keys="GameEvent.character_id", back_populates="character")
-    event_participations = relationship("EventParticipant", back_populates="character")
-
-    # Participation in conversations
-    conversation_participations = relationship(
-        "ConversationParticipant",
-        back_populates="character",
-        cascade="all, delete-orphan"
-    )
+    agent = relationship("Agent", back_populates="character", uselist=False)
+    initiated_events = relationship("GameEvent", foreign_keys="[GameEvent.character_id]", back_populates="character", cascade="all, delete-orphan")
+    event_participations = relationship("EventParticipant", back_populates="character", cascade="all, delete-orphan")
+    conversation_participations = relationship("ConversationParticipant", back_populates="character", cascade="all, delete-orphan")
+    
+    __mapper_args__ = {
+        "polymorphic_identity": "character",
+    }
     
     def __repr__(self):
-        return f"<Character {self.id} - {self.name}>"
+        return f"<Character {self.id} - {self.name} ({self.character_type})>"

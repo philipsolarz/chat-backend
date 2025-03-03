@@ -1,10 +1,9 @@
-from typing import List, Optional, Dict, Any
+from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
 import enum
 
 class SubscriptionStatus(str, enum.Enum):
-    """Status of a subscription"""
     ACTIVE = "active"
     CANCELED = "canceled"
     PAST_DUE = "past_due"
@@ -14,7 +13,6 @@ class SubscriptionStatus(str, enum.Enum):
     INCOMPLETE_EXPIRED = "incomplete_expired"
 
 class SubscriptionPlanResponse(BaseModel):
-    """Response with subscription plan details"""
     id: str
     name: str
     description: Optional[str] = None
@@ -28,10 +26,9 @@ class SubscriptionPlanResponse(BaseModel):
     can_make_public_characters: bool
 
     class Config:
-        from_attributes = True
+        orm_mode = True  # using orm_mode makes it easy to load from SQLAlchemy models
 
 class UserSubscriptionResponse(BaseModel):
-    """Response with user subscription details"""
     id: str
     user_id: str
     plan_id: str
@@ -47,17 +44,14 @@ class UserSubscriptionResponse(BaseModel):
     plan: SubscriptionPlanResponse
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 class CheckoutResponse(BaseModel):
-    """Response with checkout URL"""
     checkout_url: str
 
 class PortalResponse(BaseModel):
-    """Response with billing portal URL"""
     portal_url: str
 
 class SubscriptionInfoResponse(BaseModel):
-    """Response with subscription info"""
     is_premium: bool
     subscription: Optional[UserSubscriptionResponse] = None

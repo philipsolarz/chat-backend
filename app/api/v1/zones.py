@@ -1,10 +1,12 @@
-# app/api/v1/zones.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from app.database import get_db
-from app.schemas import ZoneBase, ZoneCreate, ZoneDetailResponse, ZoneEventsRequest, ZoneHierarchyResponse, ZoneList, ZoneResponse, ZoneTreeNode, ZoneUpdate
+from app.schemas import (
+    ZoneBase, ZoneCreate, ZoneDetailResponse, ZoneHierarchyResponse,
+    ZoneList, ZoneResponse, ZoneTreeNode, ZoneUpdate
+)
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.services.zone_service import ZoneService
@@ -25,12 +27,12 @@ async def create_zone(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a new zone
+    Create a new zone.
     
-    This checks that:
-    1. The user has access to the world
-    2. The world has not reached its tier-based zone limit
-    3. If parent_zone_id is provided, it's a valid zone in the same world
+    Checks:
+      1. The user has access to the world.
+      2. The world has not reached its tier-based zone limit.
+      3. If parent_zone_id is provided, it's a valid zone in the same world.
     """
     # Check if user has access to the world
     world = world_service.get_world(zone.world_id)
@@ -40,7 +42,7 @@ async def create_zone(
             detail="World not found"
         )
     
-    # Check if user has write access to the world (must be owner)
+    # Only the world owner can create zones
     if world.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -55,12 +57,12 @@ async def create_zone(
             detail=f"Zone limit reached (maximum: {zone_limit} for tier {world.tier}). Upgrade the world tier to create more zones."
         )
     
-    # Create the zone
+    # Create the zone (using "properties" instead of "settings")
     new_zone = zone_service.create_zone(
         world_id=zone.world_id,
         name=zone.name,
         description=zone.description,
-        settings=zone.settings,
+        properties=zone.properties,
         parent_zone_id=zone.parent_zone_id
     )
     
@@ -87,9 +89,9 @@ async def list_zones(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get zones for a specific world with pagination and filtering
+    Get zones for a specific world with pagination and filtering.
     
-    Can be filtered to show only sub-zones of a specific parent zone
+    Can be filtered to show only sub-zones of a specific parent zone.
     """
     # Check if user has access to the world
     world = world_service.get_world(world_id)
@@ -105,16 +107,12 @@ async def list_zones(
             detail="You don't have access to this world"
         )
     
-    # Set up filters
     filters = {'world_id': world_id}
-    
     if parent_zone_id is not None:
         filters['parent_zone_id'] = parent_zone_id
-    
     if name:
         filters['name'] = name
     
-    # Get zones
     zones, total_count, total_pages = zone_service.get_zones(
         filters=filters,
         page=page,
@@ -140,11 +138,11 @@ async def get_zone_hierarchy(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get the full hierarchy of zones for a world
+    Get the full hierarchy of zones for a world.
     
-    Returns a nested structure with top-level zones and their sub-zones
+    Returns a nested structure with top-level zones and their sub-zones.
     """
-    # Check if user has access to the world
+    # Check user access to the world
     world = world_service.get_world(world_id)
     if not world:
         raise HTTPException(
@@ -158,43 +156,32 @@ async def get_zone_hierarchy(
             detail="You don't have access to this world"
         )
     
-    # Get all zones for this world
+    # Fetch all zones for this world
     all_zones = zone_service.db.query(Zone).filter(Zone.world_id == world_id).all()
-    
-    # Build a dictionary mapping parent IDs to children
     parent_to_children = {}
     for zone in all_zones:
-        parent_id = zone.parent_zone_id
-        if parent_id not in parent_to_children:
-            parent_to_children[parent_id] = []
-        parent_to_children[parent_id].append(zone)
+        parent_to_children.setdefault(zone.parent_zone_id, []).append(zone)
     
-    # Build the hierarchy
     top_level_zones = parent_to_children.get(None, [])
     
-    def build_tree(zone):
+    def build_tree(zone: Zone) -> ZoneTreeNode:
         node = ZoneTreeNode(
             id=zone.id,
             name=zone.name,
             description=zone.description,
-            settings=zone.settings,
+            properties=zone.properties,  # updated field name
             world_id=zone.world_id,
             parent_zone_id=zone.parent_zone_id,
-            tier=zone.tier,  # Include tier information
+            tier=zone.tier,
             created_at=zone.created_at,
+            updated_at=zone.updated_at,
             sub_zones=[]
         )
-        
-        # Add children recursively
-        children = parent_to_children.get(zone.id, [])
-        for child in children:
+        for child in parent_to_children.get(zone.id, []):
             node.sub_zones.append(build_tree(child))
-        
         return node
     
-    # Build the tree structure
     result = [build_tree(zone) for zone in top_level_zones]
-    
     return {"zones": result}
 
 
@@ -206,9 +193,7 @@ async def get_zone(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get details of a specific zone
-    
-    Includes counts of sub-zones and entities
+    Get details of a specific zone, including counts of sub-zones and entities.
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -217,25 +202,26 @@ async def get_zone(
             detail="Zone not found"
         )
     
-    # Check if user has access to the world
     if not world_service.check_user_access(current_user.id, zone.world_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this world"
         )
     
-    # Count sub-zones
     sub_zone_count = zone_service.db.query(Zone).filter(Zone.parent_zone_id == zone_id).count()
-    
-    # Count entities
     entity_count = zone_service.count_entities_in_zone(zone_id)
+    entity_limit = zone_service.calculate_entity_limit(zone.tier)
     
-    # Get entity limits based on tier
-    entity_limit = zone_service.get_zone_entity_limit(zone.tier)
-    
-    # Create response
     response = {
-        **zone.__dict__,
+        "id": zone.id,
+        "name": zone.name,
+        "description": zone.description,
+        "properties": zone.properties,  # updated field name
+        "world_id": zone.world_id,
+        "parent_zone_id": zone.parent_zone_id,
+        "tier": zone.tier,
+        "created_at": zone.created_at,
+        "updated_at": zone.updated_at,
         "sub_zone_count": sub_zone_count,
         "entity_count": entity_count,
         "entity_limit": entity_limit,
@@ -254,9 +240,9 @@ async def update_zone(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Update a zone
+    Update a zone.
     
-    Can update properties and change parent (move the zone in the hierarchy)
+    You can update the zone properties and change its parent (moving the zone in the hierarchy).
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -265,7 +251,6 @@ async def update_zone(
             detail="Zone not found"
         )
     
-    # Check if user has write access to the world (must be owner)
     world = world_service.get_world(zone.world_id)
     if not world or world.owner_id != current_user.id:
         raise HTTPException(
@@ -274,7 +259,6 @@ async def update_zone(
         )
     
     update_data = zone_update.dict(exclude_unset=True)
-    
     updated_zone = zone_service.update_zone(zone_id, update_data)
     if not updated_zone:
         raise HTTPException(
@@ -293,10 +277,10 @@ async def delete_zone(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Delete a zone
+    Delete a zone.
     
     If the zone has sub-zones, they will be reparented to the zone's parent.
-    If the zone has entities and no parent, it cannot be deleted.
+    If the zone has entities and no parent, deletion is disallowed.
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -305,7 +289,6 @@ async def delete_zone(
             detail="Zone not found"
         )
     
-    # Check if user has write access to the world (must be owner)
     world = world_service.get_world(zone.world_id)
     if not world or world.owner_id != current_user.id:
         raise HTTPException(
@@ -323,10 +306,7 @@ async def delete_zone(
     return None
 
 
-@router.get(
-    "/{zone_id}/entity-limits",
-    response_model=Dict[str, Any]
-)
+@router.get("/{{zone_id}}/entity-limits", response_model=Dict[str, Any])
 async def get_zone_entity_limits(
     zone_id: str,
     current_user: User = Depends(get_current_user),
@@ -334,9 +314,9 @@ async def get_zone_entity_limits(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get entity limit information for a zone based on tier
+    Get entity limit information for a zone based on its tier.
     
-    Returns current entity count, tier-based limit, and upgrade information
+    Returns current entity count, tier-based limit, and upgrade info.
     """
     zone = zone_service.get_zone(zone_id)
     if not zone:
@@ -345,17 +325,13 @@ async def get_zone_entity_limits(
             detail="Zone not found"
         )
     
-    # Check if user has access to the world
     if not world_service.check_user_access(current_user.id, zone.world_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this world"
         )
     
-    # Get zone entity limits based on tier
     limits = zone_service.get_zone_entity_limits(zone_id)
-    
-    # Check if user is the world owner (for purchase options)
     world = world_service.get_world(zone.world_id)
     is_owner = world and world.owner_id == current_user.id
     
@@ -377,12 +353,11 @@ async def create_zone_tier_upgrade_checkout(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a checkout session for purchasing a zone tier upgrade
+    Create a checkout session for purchasing a zone tier upgrade.
     
-    Returns a URL to redirect the user to for payment
+    Returns a URL to redirect the user for payment.
     """
     try:
-        # Get the zone
         zone = zone_service.get_zone(zone_id)
         if not zone:
             raise HTTPException(
@@ -390,7 +365,6 @@ async def create_zone_tier_upgrade_checkout(
                 detail="Zone not found"
             )
         
-        # Get the world to verify ownership
         world = world_service.get_world(zone.world_id)
         if not world:
             raise HTTPException(
@@ -398,14 +372,12 @@ async def create_zone_tier_upgrade_checkout(
                 detail="World not found"
             )
         
-        # Check if user is the world owner
         if world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the world owner can purchase zone tier upgrades"
             )
         
-        # Create checkout for zone tier upgrade
         checkout_url = payment_service.create_zone_tier_upgrade_checkout(
             user_id=current_user.id,
             zone_id=zone_id,
