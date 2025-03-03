@@ -25,35 +25,16 @@ class CharacterService:
                         zone_id: Optional[str] = None,
                         world_id: Optional[str] = None
                         ) -> Optional[Character]:
-        """
-        Create a new character.
-        
-        Args:
-            user_id: ID of the user creating the character (owner)
-            name: Name of the character
-            description: Description of the character (including personality)
-            zone_id: Zone ID to place the character in
-            world_id: ID of the world (for reference, not directly used here)
-            
-        Returns:
-            Created character or None if entity creation fails (e.g., zone reached its entity limit)
-        """
-        # First, create an entity (which is the base for our character)
-        entity = self.entity_service.create_entity(
-            name=name,
-            description=description,
-            entity_type=EntityType.CHARACTER,
-            zone_id=zone_id,
-        )
-        
-        if not entity:
-            return None  # Failed to create entity
-        
-        # Create a character using the same id as the created entity.
+        """Create a new character"""
+        # Create a character directly with all needed fields
         character = Character(
-            id=entity.id,
-            character_type=CharacterType.PLAYER,  # default to player-controlled
-            player_id=user_id
+            name=name,  # Entity field
+            description=description,  # Entity field
+            zone_id=zone_id,  # Entity field
+            type=EntityType.CHARACTER.value,  # Entity field
+            character_type=CharacterType.PLAYER,  # Character field
+            player_id=user_id, # Character field
+            tier=1  # Entity field
         )
         
         self.db.add(character)
