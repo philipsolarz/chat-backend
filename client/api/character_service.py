@@ -36,17 +36,18 @@ class CharacterService(BaseService):
             print(f"Error getting public characters: {str(e)}")
             return []
     
-    async def create_character(self, name: str, description: Optional[str] = None, 
-                               zone_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """
-        Create a new character.
-        
-        Note: The updated API only requires a zone_id, name, and description.
-        """
+    async def create_character(self, 
+                               name: str, 
+                               world_id: str,
+                               description: Optional[str] = None, 
+                               is_public: bool = False,
+                               zone_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         try:
             payload = {
                 "name": name,
                 "description": description,
+                "world_id": world_id,  # Include in payload
                 "zone_id": zone_id
             }
             character = await self.post("/characters/", payload)

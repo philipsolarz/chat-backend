@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-# Event service for managing game events
+# Updated Event service for managing game events
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from client.api.base_service import BaseService, APIError
 from client.game.state import game_state
 from client.ui.console import console
-
 
 class EventService(BaseService):
     """Service for game event-related API operations"""
@@ -19,7 +18,6 @@ class EventService(BaseService):
         """Get events that occurred in a zone"""
         try:
             params = {
-                "zone_id": zone_id,
                 "limit": limit
             }
             
@@ -32,7 +30,8 @@ class EventService(BaseService):
             if before_timestamp:
                 params["before"] = before_timestamp.isoformat()
                 
-            return await self.get("/events/zone/{zone_id}", params)
+            # Fixed URL construction - zone_id goes in the path, not in params
+            return await self.get(f"/events/zone/{zone_id}", params)
         except APIError as e:
             console.print(f"[red]Failed to get zone events: {e.detail}[/red]")
             return []
