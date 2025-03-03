@@ -1,5 +1,5 @@
 # app/api/dependencies.py
-from typing import Dict, Any, Type, Callable
+from typing import Any, Type, Callable
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -16,14 +16,13 @@ from app.services.conversation_service import ConversationService
 from app.services.entity_service import EntityService
 from app.services.world_service import WorldService
 from app.services.zone_service import ZoneService
+from app.services.object_service import ObjectService  # Assumed to exist
 
-
-def get_service(service_class):
+def get_service(service_class: Type) -> Callable:
     """Factory function to create service dependencies with DB injection"""
     def _get_service(db: Session = Depends(get_db)):
         return service_class(db)
     return _get_service
-
 
 def get_character_owner(
     character_id: str,
@@ -31,8 +30,7 @@ def get_character_owner(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ) -> Character:
     """
-    Dependency to verify a character belongs to the current user
-    Returns the character if it exists and belongs to the user
+    Verify that a character exists and belongs to the current user.
     """
     character = character_service.get_character(character_id)
     
@@ -50,19 +48,15 @@ def get_character_owner(
     
     return character
 
-
 def get_conversation_access(
     conversation_id: str,
     current_user: Player = Depends(get_current_user),
     conversation_service: ConversationService = Depends(get_service(ConversationService))
 ) -> Conversation:
     """
-    Dependency to verify a user has access to a conversation
-    
-    User has access if they are a participant in the conversation
-    Returns the conversation if access is allowed
+    Verify that the current user has access to the conversation.
+    Access is granted if the user is a participant.
     """
-    # Get the conversation
     conversation = conversation_service.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -70,7 +64,6 @@ def get_conversation_access(
             detail="Conversation not found"
         )
     
-    # Check if user has access
     if not conversation_service.check_user_access(current_user.id, conversation_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -79,16 +72,13 @@ def get_conversation_access(
     
     return conversation
 
-
 def get_participant_owner(
     participant_id: str,
     current_user: Player = Depends(get_current_user),
     conversation_service: ConversationService = Depends(get_service(ConversationService))
 ) -> ConversationParticipant:
     """
-    Dependency to verify a participant belongs to the current user
-    
-    Returns the participant if it exists and belongs to the user
+    Verify that a conversation participant exists and is owned by the current user.
     """
     participant = conversation_service.get_participant(participant_id)
     
@@ -106,7 +96,6 @@ def get_participant_owner(
     
     return participant
 
-
 def check_entity_ownership(
     entity_id: str,
     current_user: Player = Depends(get_current_user),
@@ -115,9 +104,8 @@ def check_entity_ownership(
     zone_service: ZoneService = Depends(get_service(ZoneService))
 ) -> Entity:
     """
-    Dependency to verify user owns the world containing an entity
-    Raises appropriate HTTP exceptions if checks fail
-    Returns the entity if successful
+    Verify that the current user owns the world containing the entity.
+    Since entities always have a zone, we check the zone’s world ownership.
     """
     entity = entity_service.get_entity(entity_id)
     if not entity:
@@ -126,52 +114,34 @@ def check_entity_ownership(
             detail="Entity not found"
         )
     
-    # If entity has a world ID, check ownership directly
-    if entity.world_id:
-        world = world_service.get_world(entity.world_id)
-        if not world or world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can manage this entity"
-            )
-    
-    # If entity has a zone ID, check the zone's world ownership
-    elif entity.zone_id:
-        zone = zone_service.get_zone(entity.zone_id)
-        if not zone:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Zone not found"
-            )
-            
-        world = world_service.get_world(zone.world_id)
-        if not world or world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can manage this entity"
-            )
-    else:
-        # If no world or zone, require admin privileges
-        if not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only administrators can manage unassigned entities"
-            )
+    # Retrieve the zone for this entity.
+    zone = zone_service.get_zone(entity.zone_id)
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Zone not found"
+        )
+        
+    # Retrieve the world owning that zone.
+    world = world_service.get_world(zone.world_id)
+    if not world or world.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the world owner can manage this entity"
+        )
     
     return entity
-
 
 def check_object_ownership(
     object_id: str,
     current_user: Player = Depends(get_current_user),
-    object_service = Depends(get_service("ObjectService")),
+    object_service: ObjectService = Depends(get_service(ObjectService)),
     world_service: WorldService = Depends(get_service(WorldService)),
     zone_service: ZoneService = Depends(get_service(ZoneService))
 ) -> Any:
     """
-    Dependency to verify user owns the world containing an object
-    Raises appropriate HTTP exceptions if checks fail
-    Returns the object if successful
+    Verify that the current user owns the world containing the object.
+    Objects inherit from Entity and always have a zone, so we check the zone's world.
     """
     obj = object_service.get_object(object_id)
     if not obj:
@@ -180,36 +150,20 @@ def check_object_ownership(
             detail="Object not found"
         )
     
-    # If object has a world ID, check ownership directly
-    if obj.world_id:
-        world = world_service.get_world(obj.world_id)
-        if not world or world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can manage this object"
-            )
-    
-    # If object has a zone ID, check the zone's world ownership
-    elif obj.zone_id:
-        zone = zone_service.get_zone(obj.zone_id)
-        if not zone:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Zone not found"
-            )
+    # Retrieve the zone for this object.
+    zone = zone_service.get_zone(obj.zone_id)
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Zone not found"
+        )
             
-        world = world_service.get_world(zone.world_id)
-        if not world or world.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the world owner can manage this object"
-            )
-    else:
-        # If no world or zone, require admin privileges
-        if not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only administrators can manage unassigned objects"
-            )
+    # Retrieve the world owning that zone.
+    world = world_service.get_world(zone.world_id)
+    if not world or world.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the world owner can manage this object"
+        )
     
     return obj

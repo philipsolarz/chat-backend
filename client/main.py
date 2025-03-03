@@ -47,12 +47,12 @@ async def display_welcome():
     clear_screen()
     
     title = "RPG CHAT CLIENT"
-    show_title(title)
+    show_title(title, "Connect to Interactive Virtual Worlds")
     
     welcome_text = (
         "Welcome to the RPG Chat Client!\n\n"
         "This client allows you to explore virtual worlds, create characters, \n"
-        "and interact with other players and AI-controlled agents.\n\n"
+        "and interact with other players and AI-controlled characters.\n\n"
         "- Select or create a world to begin your adventure\n"
         "- Create and customize characters to represent you\n"
         "- Navigate through different zones in your world\n"
@@ -64,7 +64,7 @@ async def display_welcome():
     console.print(f"\n[dim]API URL: {config.api_url}[/dim]")
     console.print(f"[dim]WebSocket URL: {config.ws_url}[/dim]")
     
-    await asyncio.sleep(2)  # Short pause to allow reading
+    await asyncio.sleep(1.5)  # Short pause to allow reading
 
 
 async def handle_authentication() -> bool:
@@ -150,10 +150,10 @@ async def handle_chat() -> bool:
 async def handle_main_menu() -> str:
     """Show main menu and handle selection"""
     options = [
+        ("play", "Play Game"),
         ("world", "World Management"),
         ("character", "Character Management"),
         ("zone", "Zone Navigation"),
-        ("chat", "Enter Chat"),
         ("account", "Account Settings"),
         ("exit", "Exit Game")
     ]
@@ -161,6 +161,11 @@ async def handle_main_menu() -> str:
     subtitle = None
     if game_state.is_authenticated():
         subtitle = f"Logged in as: {game_state.user_email}"
+        if game_state.is_premium:
+            subtitle += " [Premium]"
+        else:
+            subtitle += " [Free]"
+            
         if game_state.current_world_name:
             subtitle += f" | World: {game_state.current_world_name}"
         if game_state.current_character_name:
@@ -169,6 +174,35 @@ async def handle_main_menu() -> str:
             subtitle += f" | Zone: {game_state.current_zone_name}"
     
     return create_menu("RPG Chat - Main Menu", options, subtitle)
+
+
+async def play_game() -> bool:
+    """Direct flow to enter the game with minimal prompts"""
+    # Check if we need to select a world
+    if not game_state.current_world_id:
+        show_info("You need to select a world first.")
+        if not await handle_world_selection():
+            return False
+    
+    # Check if we need to select a character
+    if not game_state.current_character_id:
+        show_info("You need to select a character for this world.")
+        if not await handle_character_selection():
+            return False
+    
+    # Check if we need to select a zone
+    if not game_state.current_zone_id:
+        show_info("You need to select a zone to enter.")
+        if not await handle_zone_navigation():
+            return False
+    
+    # Enter chat
+    return await handle_chat()
+
+
+def show_info(message: str):
+    """Display an info message"""
+    console.print(f"[bold blue]Info:[/bold blue] {message}")
 
 
 async def main_loop():
@@ -186,7 +220,11 @@ async def main_loop():
         # Show main menu
         choice = await handle_main_menu()
         
-        if choice == "world":
+        if choice == "play":
+            # Direct path to play the game
+            await play_game()
+            
+        elif choice == "world":
             # Handle world management
             world_menu = WorldMenu()
             result = await world_menu.show_world_menu()
@@ -212,7 +250,16 @@ async def main_loop():
             
             # Handle character management
             character_menu = CharacterMenu()
-            await character_menu.show_character_menu()
+            result = await character_menu.show_character_menu()
+            
+            if result == "play":
+                # If playing a character, proceed to zone selection
+                if not game_state.current_zone_id:
+                    if not await handle_zone_navigation():
+                        continue
+                
+                # Then to chat
+                await handle_chat()
         
         elif choice == "zone":
             # Check if world and character are selected first
@@ -234,26 +281,6 @@ async def main_loop():
                 # If entering a zone, proceed to chat
                 await handle_chat()
         
-        elif choice == "chat":
-            # Check if world, character, and zone are selected first
-            if not game_state.current_world_id:
-                show_warning("Please select a world first")
-                if not await handle_world_selection():
-                    continue
-            
-            if not game_state.current_character_id:
-                show_warning("Please select a character first")
-                if not await handle_character_selection():
-                    continue
-            
-            if not game_state.current_zone_id:
-                show_warning("Please select a zone first")
-                if not await handle_zone_navigation():
-                    continue
-            
-            # Handle chat interface
-            await handle_chat()
-        
         elif choice == "account":
             # Handle account settings
             auth_view = AuthView()
@@ -266,6 +293,15 @@ async def main_loop():
                     if not await handle_authentication():
                         console.print("[yellow]Exiting due to authentication failure.[/yellow]")
                         return
+                        
+            elif account_choice == "profile":
+                # View profile - just a placeholder for now
+                clear_screen()
+                show_title("User Profile")
+                console.print(f"[bold]Email:[/bold] {game_state.user_email}")
+                console.print(f"[bold]User ID:[/bold] {game_state.current_user_id}")
+                console.print(f"[bold]Premium:[/bold] {'Yes' if game_state.is_premium else 'No'}")
+                input("\nPress Enter to continue...")
         
         elif choice == "exit" or choice is None:
             # Exit game

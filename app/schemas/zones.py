@@ -1,14 +1,13 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
-
 from app.schemas.base import PaginatedResponse
 
 class ZoneBase(BaseModel):
     """Base zone properties"""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
+    properties: Optional[Dict[str, Any]] = None  # renamed from settings
 
 class ZoneCreate(ZoneBase):
     """Properties required to create a zone"""
@@ -19,7 +18,7 @@ class ZoneUpdate(BaseModel):
     """Properties that can be updated"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
+    properties: Optional[Dict[str, Any]] = None  # renamed from settings
     parent_zone_id: Optional[str] = None
 
 class ZoneResponse(ZoneBase):
@@ -45,15 +44,12 @@ class ZoneTreeNode(ZoneResponse):
     """Recursive zone node for hierarchy"""
     sub_zones: List['ZoneTreeNode'] = []
 
-# Need to update forward refs for recursive type
 ZoneTreeNode.update_forward_refs()
 
 class ZoneHierarchyResponse(BaseModel):
     """Response containing the zone hierarchy"""
     zones: List[ZoneTreeNode]
 
-
-
 class ZoneList(PaginatedResponse):
-    """Paginated list of conversations"""
+    """Paginated list of zones"""
     items: List[ZoneResponse]

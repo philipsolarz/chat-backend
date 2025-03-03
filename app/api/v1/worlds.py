@@ -1,4 +1,3 @@
-# app/api/v1/worlds.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
@@ -24,16 +23,16 @@ async def create_world(
     """
     Create a new world
     
-    Returns the created world
+    Returns the created world.
     """
-    # Check if user is admin for setting official status
+    # Only admins can mark worlds as official.
     if world.is_official and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can create official worlds"
         )
         
-    # Create the world
+    # Create the world using the provided settings (which maps to properties)
     return world_service.create_world(
         owner_id=current_user.id,
         name=world.name,
@@ -57,20 +56,15 @@ async def list_worlds(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get all worlds owned by the current user with pagination and filtering
+    Get worlds with pagination and filtering.
     
-    Returns a paginated list of worlds
+    Returns a paginated list of worlds.
     """
     filters = {}
-    # filters = {'owner_id': current_user.id}  # Only list user's own worlds
-    
     if name:
         filters['name'] = name
-        
     if is_official is not None:
         filters['is_official'] = is_official
-        
-    # Only include private worlds if specifically requested or if user is owner
     if not include_private:
         filters['is_private'] = False
 
@@ -98,25 +92,21 @@ async def get_world(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get a specific world by ID
+    Get a specific world by ID.
     
-    Access is allowed for world owners, admins, or public non-private worlds
+    Accessible for world owners, admins, or for public (non-private) worlds.
     """
     world = world_service.get_world(world_id)
-    
     if not world:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="World not found"
         )
-    
-    # Check access permissions
     if not world_service.check_user_access(current_user.id, world_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to view this world"
         )
-    
     return world
 
 
@@ -128,33 +118,30 @@ async def update_world(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Update a world
+    Update a world.
     
-    Only the owner can update a world
+    Only the owner may update their world.
     """
     world = world_service.get_world(world_id)
-    
     if not world:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="World not found"
         )
-    
-    # Check ownership
     if world.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to update this world"
         )
-    
-    # Check if user is trying to set official status without admin privileges
+    # Only allow official status changes by admins.
     if world_update.is_official is not None and world_update.is_official != world.is_official and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can change the official status of worlds"
         )
     
-    update_data = world_update.dict(exclude_unset=True)
+    # Use by_alias=True so that "settings" maps to "properties"
+    update_data = world_update.dict(by_alias=True, exclude_unset=True)
     
     updated_world = world_service.update_world(world_id, update_data)
     if not updated_world:
@@ -173,39 +160,32 @@ async def delete_world(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Delete a world
+    Delete a world.
     
-    Only the owner can delete a world
+    Only the world owner may delete their world.
     """
     world = world_service.get_world(world_id)
-    
     if not world:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="World not found"
         )
-    
-    # Check ownership
     if world.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to delete this world"
         )
-    
-    # Check if trying to delete an official world without admin privileges
     if world.is_official and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can delete official worlds"
         )
-    
     success = world_service.delete_world(world_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete world"
         )
-    
     return None
 
 
@@ -220,16 +200,13 @@ async def search_worlds(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Search for worlds by name or description
+    Search for worlds by name or description.
     
-    Returns a paginated list of matching worlds
+    Returns a paginated list of matching worlds.
     """
     filters = {'search': query}
-    
     if is_official is not None:
         filters['is_official'] = is_official
-        
-    # Only include private worlds if specifically requested
     if not include_private:
         filters['is_private'] = False
     
@@ -248,19 +225,16 @@ async def search_worlds(
     }
 
 
-@router.get(
-    "/{world_id}/limits",
-    response_model=Dict[str, Any]
-)
+@router.get("/search/limits", response_model=Dict[str, Any])
 async def get_world_limits(
     world_id: str,
     current_user: User = Depends(get_current_user),
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get zone limit information for a world based on its tier
+    Get zone limit information for a world based on its tier.
     
-    Returns information about zone capacity
+    Returns zone usage statistics.
     """
     world = world_service.get_world(world_id)
     if not world:
@@ -268,20 +242,14 @@ async def get_world_limits(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="World not found"
         )
-    
-    # Check access permissions
     if not world_service.check_user_access(current_user.id, world_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to view this world"
         )
-    
-    # Get current zone count
     from app.services.zone_service import ZoneService
     zone_service = ZoneService(next(get_db()))
     zone_count = zone_service.count_zones_in_world(world_id)
-    
-    # Get zone limit based on tier
     zone_limit = world_service.calculate_zone_limit(world.tier)
     
     return {
@@ -289,7 +257,7 @@ async def get_world_limits(
         "zone_count": zone_count,
         "zone_limit": zone_limit,
         "remaining_capacity": zone_limit - zone_count,
-        "can_upgrade": True,  # Assuming upgrades are always possible
+        "can_upgrade": True,
         "is_owner": world.owner_id == current_user.id
     }
 
@@ -304,35 +272,29 @@ async def create_world_tier_upgrade_checkout(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Create a checkout session for purchasing a world tier upgrade
+    Create a checkout session for purchasing a world tier upgrade.
     
-    Returns a URL to redirect the user to for payment
+    Returns a URL for redirecting the user to complete payment.
     """
     try:
-        # Check if user is the world owner
         world = world_service.get_world(world_id)
         if not world:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="World not found"
             )
-        
         if world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the world owner can purchase tier upgrades"
             )
-        
-        # Create checkout for world tier upgrade
         checkout_url = payment_service.create_world_tier_upgrade_checkout(
             user_id=current_user.id,
             world_id=world_id,
             success_url=success_url,
             cancel_url=cancel_url
         )
-        
         return {"checkout_url": checkout_url}
-    
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -16,22 +16,21 @@ class ObjectBase(BaseModel):
 
 class ObjectCreate(ObjectBase):
     """Properties required to create an object"""
-    zone_id: Optional[str] = None
-    world_id: Optional[str] = None
+    zone_id: Optional[str] = Field(None, description="Zone ID where the object will be placed")
+    properties: Optional[Dict[str, Any]] = Field(None, description="JSON settings for object configuration")
 
 class ObjectUpdate(BaseModel):
     """Properties that can be updated"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
+    properties: Optional[Dict[str, Any]] = None
 
 class ObjectResponse(ObjectBase):
     """Response model with all object properties"""
     id: str
-    world_id: Optional[str] = None
     zone_id: Optional[str] = None
     entity_id: Optional[str] = None
-    type: ObjectType
+    object_type: ObjectType
     properties: Optional[Dict[str, Any]] = None
     tier: int
     created_at: datetime
@@ -41,5 +40,5 @@ class ObjectResponse(ObjectBase):
         from_attributes = True
 
 class ObjectList(PaginatedResponse):
-    """Paginated list of conversations"""
+    """Paginated list of objects"""
     items: List[ObjectResponse]

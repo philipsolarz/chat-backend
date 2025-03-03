@@ -1,22 +1,27 @@
-# app/api/v1/events.py
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from sqlalchemy import desc, func, or_, and_
 
-from app.schemas import EventParticipantBase, EventParticipantResponse, EventType
+from app.schemas import (
+    EventType as SchemaEventType,
+    EventScope as SchemaEventScope,
+    GameEventResponse,
+    UnreadCountResponse,
+    ConversationSummary
+)
 from app.database import get_db
 from app.api.auth import get_current_user
 from app.api.dependencies import get_service
 from app.models.player import Player as User
-from app.models.game_event import EventType, EventScope
+from app.models.game_event import GameEvent, EventType, EventScope, EventParticipant
 from app.services.event_service import EventService
 from app.services.character_service import CharacterService
 
 router = APIRouter()
 
-
-@router.get("/zone/{zone_id}", response_model=List[Dict[str, Any]])
+@router.get("/zone/{zone_id}", response_model=List[GameEventResponse])
 async def get_zone_events(
     zone_id: str,
     character_id: str = Query(..., description="Character ID viewing events"),
@@ -28,13 +33,9 @@ async def get_zone_events(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ):
     """
-    Get events that occurred in a zone
-    
-    Returns events that are visible to the specified character:
-    - All public events in the zone
-    - Private events where the character is a participant
+    Get events that occurred in a zone.
+    Returns events that are visible to the specified character (public events plus private events where the character is a participant).
     """
-    # Check if user can access this character
     character = character_service.get_character(character_id)
     if not character or character.player_id != current_user.id:
         raise HTTPException(
@@ -42,7 +43,6 @@ async def get_zone_events(
             detail="You can only view events as your own character"
         )
     
-    # Get the events
     events = event_service.get_zone_events(
         zone_id=zone_id,
         character_id=character_id,
@@ -51,41 +51,47 @@ async def get_zone_events(
         before_timestamp=before
     )
     
-    # Format the events for the response
     result = []
     for event in events:
-        # Get character info
-        character = character_service.get_character(event.character_id) if event.character_id else None
-        
-        # Format based on event type
-        event_data = {
+        evt = {
             "id": event.id,
             "type": event.type,
+            "data": event.data,
             "character_id": event.character_id,
-            "character_name": character.name if character else None,
             "zone_id": event.zone_id,
-            "timestamp": event.created_at.isoformat(),
-            "data": event.data
+            "world_id": event.world_id,
+            "target_entity_id": event.target_entity_id,
+            "scope": event.scope,
+            "created_at": event.created_at,
+            "participants": [
+                {
+                    "id": participant.id,
+                    "event_id": participant.event_id,
+                    "character_id": participant.character_id,
+                    "is_read": participant.is_read,
+                    "created_at": participant.created_at
+                }
+                for participant in event.event_participants
+            ]
         }
         
-        # Add target entity info if applicable
+        if event.character_id:
+            sender = character_service.get_character(event.character_id)
+            evt["character_name"] = sender.name if sender else None
+        
         if event.target_entity_id:
             from app.services.entity_service import EntityService
-            entity_service = EntityService(event_service.db)
+            # Instantiate EntityService using the current DB session
+            entity_service = EntityService(get_db())
             entity = entity_service.get_entity(event.target_entity_id)
             if entity:
-                event_data["target_entity"] = {
-                    "id": entity.id,
-                    "name": entity.name,
-                    "type": entity.type
-                }
+                evt["target_entity_name"] = entity.name
         
-        result.append(event_data)
+        result.append(evt)
     
     return result
 
-
-@router.get("/private", response_model=List[Dict[str, Any]])
+@router.get("/private", response_model=List[GameEventResponse])
 async def get_private_events(
     character_id: str = Query(..., description="Character ID viewing events"),
     other_character_id: Optional[str] = Query(None, description="Filter to events with this character"),
@@ -97,13 +103,9 @@ async def get_private_events(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ):
     """
-    Get private events for a character
-    
-    Returns private events where the character is a participant:
-    - If other_character_id is provided, only returns events where both characters are participants
-    - Otherwise returns all private events for the character
+    Get private events for a character.
+    If `other_character_id` is provided, only events where both characters are participants are returned.
     """
-    # Check if user can access this character
     character = character_service.get_character(character_id)
     if not character or character.player_id != current_user.id:
         raise HTTPException(
@@ -111,7 +113,6 @@ async def get_private_events(
             detail="You can only view events as your own character"
         )
     
-    # Get the events
     events = event_service.get_private_events(
         character_id=character_id,
         other_character_id=other_character_id,
@@ -120,39 +121,38 @@ async def get_private_events(
         before_timestamp=before
     )
     
-    # Format the events for the response
     result = []
     for event in events:
-        # Get character info
-        character = character_service.get_character(event.character_id) if event.character_id else None
-        
-        # Format based on event type
-        event_data = {
+        evt = {
             "id": event.id,
             "type": event.type,
+            "data": event.data,
             "character_id": event.character_id,
-            "character_name": character.name if character else None,
-            "timestamp": event.created_at.isoformat(),
-            "data": event.data
+            "scope": event.scope,
+            "created_at": event.created_at,
+            "participants": []
         }
+        if event.character_id:
+            sender = character_service.get_character(event.character_id)
+            evt["character_name"] = sender.name if sender else None
         
-        # Add other participants info
-        event_data["participants"] = []
         for participant in event.event_participants:
-            part_character = character_service.get_character(participant.character_id)
-            if part_character:
-                event_data["participants"].append({
-                    "character_id": part_character.id,
-                    "character_name": part_character.name,
-                    "is_read": participant.is_read
+            part = character_service.get_character(participant.character_id)
+            if part:
+                evt["participants"].append({
+                    "id": participant.id,
+                    "event_id": participant.event_id,
+                    "character_id": part.id,
+                    "character_name": part.name,
+                    "is_read": participant.is_read,
+                    "created_at": participant.created_at
                 })
         
-        result.append(event_data)
+        result.append(evt)
     
     return result
 
-
-@router.get("/active-conversations", response_model=List[Dict[str, Any]])
+@router.get("/active-conversations", response_model=List[ConversationSummary])
 async def get_active_conversations(
     character_id: str = Query(..., description="Character ID to get conversations for"),
     limit: int = Query(10, le=50, description="Maximum number of conversations to return"),
@@ -161,12 +161,9 @@ async def get_active_conversations(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ):
     """
-    Get active conversations for a character
-    
-    Returns a list of other characters the specified character has exchanged private messages with,
-    along with the latest message in each conversation
+    Get active conversations for a character.
+    Returns a list of conversation summaries (other characters, latest message, timestamp, unread count).
     """
-    # Check if user can access this character
     character = character_service.get_character(character_id)
     if not character or character.player_id != current_user.id:
         raise HTTPException(
@@ -174,14 +171,12 @@ async def get_active_conversations(
             detail="You can only view conversations as your own character"
         )
     
-    # Get the conversations
     conversations = event_service.get_active_conversations(
         character_id=character_id,
         limit=limit
     )
     
     return conversations
-
 
 @router.post("/mark-read/{event_id}", response_model=Dict[str, Any])
 async def mark_event_as_read(
@@ -192,19 +187,15 @@ async def mark_event_as_read(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ):
     """
-    Mark an event as read by a character
-    
-    This is used for tracking read status of private events
+    Mark an event as read by a character.
     """
-    # Check if user can access this character
     character = character_service.get_character(character_id)
     if not character or character.player_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only mark events as read for your own characters"
+            detail="You can only mark events as read for your own character"
         )
     
-    # Mark the event as read
     success = event_service.mark_event_as_read(
         event_id=event_id,
         character_id=character_id
@@ -216,14 +207,9 @@ async def mark_event_as_read(
             detail="Event not found or character is not a participant"
         )
     
-    return {
-        "success": True,
-        "event_id": event_id,
-        "character_id": character_id
-    }
+    return {"success": True, "event_id": event_id, "character_id": character_id}
 
-
-@router.get("/unread-count", response_model=Dict[str, int])
+@router.get("/unread-count", response_model=UnreadCountResponse)
 async def get_unread_event_count(
     character_id: str = Query(..., description="Character ID to get unread count for"),
     other_character_id: Optional[str] = Query(None, description="Filter to events with this character"),
@@ -232,25 +218,19 @@ async def get_unread_event_count(
     character_service: CharacterService = Depends(get_service(CharacterService))
 ):
     """
-    Get the number of unread events for a character
-    
-    If other_character_id is provided, only counts events where both characters are participants
+    Get the number of unread events for a character.
+    If `other_character_id` is provided, counts only events where both characters are participants.
     """
-    # Check if user can access this character
     character = character_service.get_character(character_id)
     if not character or character.player_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only get unread counts for your own characters"
+            detail="You can only get unread counts for your own character"
         )
     
-    # Get unread counts
     count = event_service.get_unread_event_count(
         character_id=character_id,
         other_character_id=other_character_id
     )
     
-    return {
-        "character_id": character_id,
-        "unread_count": count
-    }
+    return {"character_id": character_id, "unread_count": count}

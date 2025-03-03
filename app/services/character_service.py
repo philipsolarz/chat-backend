@@ -1,13 +1,14 @@
 # app/services/character_service.py
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, func
 from typing import List, Optional, Dict, Any, Tuple
 import math
 
 from app.models.character import Character, CharacterType
-from app.models.entity import Entity, EntityType
+from app.models.entity import Entity
+from app.models.enums import EntityType
 from app.models.player import Player
-
+from app.models.zone import Zone  # needed for filtering by world
 
 class CharacterService:
     """Service for handling character operations"""
@@ -18,46 +19,39 @@ class CharacterService:
         self.entity_service = EntityService(db)
     
     def create_character(self, 
-                        user_id: str, 
-                        name: str, 
-                        description: Optional[str] = None,
-                        world_id: Optional[str] = None,
-                        zone_id: Optional[str] = None,
-                        ) -> Optional[Character]:
+                         user_id: str, 
+                         name: str, 
+                         description: Optional[str] = None,
+                         zone_id: Optional[str] = None
+                         ) -> Optional[Character]:
         """
-        Create a new character
+        Create a new character.
         
         Args:
             user_id: ID of the user creating the character (owner)
             name: Name of the character
             description: Description of the character (including personality)
-            world_id: Optional world ID
             zone_id: Optional zone ID to place the character in
             
         Returns:
-            Created character or None if zone has reached its entity limit
+            Created character or None if entity creation fails (e.g., zone reached its entity limit)
         """
-        # First, create an entity
+        # First, create an entity (which is the base for our character)
         entity = self.entity_service.create_entity(
             name=name,
             description=description,
             entity_type=EntityType.CHARACTER,
             zone_id=zone_id,
-            world_id=world_id
         )
         
         if not entity:
-            return None  # Failed to create entity (e.g., zone reached limit)
+            return None  # Failed to create entity
         
-        # Create character linked to the entity
+        # Create a character using the same id as the created entity.
         character = Character(
-            name=name,
-            description=description,
-            type=CharacterType.PLAYER,  # Default to player-controlled
-            entity_id=entity.id,
-            player_id=user_id,
-            world_id=world_id,
-            zone_id=zone_id
+            id=entity.id,
+            character_type=CharacterType.PLAYER,  # default to player-controlled
+            player_id=user_id
         )
         
         self.db.add(character)
@@ -77,7 +71,7 @@ class CharacterService:
                        sort_by: str = "name", 
                        sort_desc: bool = False) -> Tuple[List[Character], int, int]:
         """
-        Get characters with flexible filtering options
+        Get characters with flexible filtering options.
         
         Args:
             filters: Dictionary of filter conditions
@@ -87,11 +81,10 @@ class CharacterService:
             sort_desc: Whether to sort in descending order
             
         Returns:
-            Tuple of (characters, total_count, total_pages)
+            Tuple of (list of characters, total count, total pages)
         """
         query = self.db.query(Character)
         
-        # Apply filters if provided
         if filters:
             if 'player_id' in filters:
                 query = query.filter(Character.player_id == filters['player_id'])
@@ -101,9 +94,10 @@ class CharacterService:
             
             if 'description' in filters:
                 query = query.filter(Character.description.ilike(f"%{filters['description']}%"))
-
+                
             if 'world_id' in filters:
-                query = query.filter(Character.world_id == filters['world_id'])
+                # Join to Zone to filter by world.
+                query = query.join(Character.zone).filter(Zone.world_id == filters['world_id'])
                 
             if 'zone_id' in filters:
                 query = query.filter(Character.zone_id == filters['zone_id'])
@@ -119,29 +113,28 @@ class CharacterService:
                         Character.description.ilike(search_term)
                     )
                 )
+            # If filtering for public characters, ensure you have an "is_public" flag defined on Character or use another mechanism.
+            if 'is_public' in filters:
+                query = query.filter(Character.is_public == filters['is_public'])
         
-        # Get total count before pagination
         total_count = query.count()
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
         
-        # Apply sorting
+        # Apply sorting based on a valid field of Character.
         if hasattr(Character, sort_by):
             sort_field = getattr(Character, sort_by)
             query = query.order_by(sort_field.desc() if sort_desc else sort_field)
         else:
-            # Default to name
             query = query.order_by(Character.name.desc() if sort_desc else Character.name)
         
-        # Apply pagination - convert page to offset
         offset = (page - 1) * page_size if page > 0 else 0
         
-        # Get paginated results
         characters = query.offset(offset).limit(page_size).all()
         
         return characters, total_count, total_pages
     
     def get_user_characters(self, user_id: str, page: int = 1, page_size: int = 20) -> Tuple[List[Character], int, int]:
-        """Get all characters owned by a user"""
+        """Get all characters owned by a specific user"""
         return self.get_characters(
             filters={'player_id': user_id},
             page=page,
@@ -150,6 +143,7 @@ class CharacterService:
     
     def get_public_characters(self, page: int = 1, page_size: int = 20) -> Tuple[List[Character], int, int]:
         """Get all public characters available for agents"""
+        # Ensure that your Character model or entity service provides an 'is_public' flag if needed.
         return self.get_characters(
             filters={'is_public': True},
             page=page,
@@ -158,24 +152,24 @@ class CharacterService:
     
     def update_character(self, character_id: str, update_data: Dict[str, Any]) -> Optional[Character]:
         """
-        Update a character and its underlying entity if needed
+        Update a character and its underlying entity if needed.
         
         Args:
-            character_id: ID of the character to update
-            update_data: Dictionary of fields to update
+            character_id: ID of the character to update.
+            update_data: Dictionary of fields to update.
             
         Returns:
-            Updated character or None if not found
+            Updated character or None if not found.
         """
         character = self.get_character(character_id)
         if not character:
             return None
         
-        # If we're updating basic properties, update the entity as well
-        if character.entity_id and ('name' in update_data or 'description' in update_data):
-            self.entity_service.update_entity_fields(character.entity_id, update_data)
+        # Update underlying entity fields (name, description, etc.)
+        if character.id and ('name' in update_data or 'description' in update_data):
+            self.entity_service.update_entity_fields(character.id, update_data)
         
-        # Update character fields
+        # Update character-specific fields.
         for key, value in update_data.items():
             if hasattr(character, key):
                 setattr(character, key, value)
@@ -187,54 +181,52 @@ class CharacterService:
     
     def delete_character(self, character_id: str) -> bool:
         """
-        Delete a character and its associated entity
+        Delete a character and its associated entity.
         
         Args:
-            character_id: ID of the character to delete
+            character_id: ID of the character to delete.
             
         Returns:
-            True if successful, False if not found
+            True if deletion was successful, False otherwise.
         """
         character = self.get_character(character_id)
         if not character:
             return False
         
-        # Get the associated entity
-        entity_id = character.entity_id
+        # Since Character.id is the same as the underlying entity id, use it.
+        entity_id = character.id
         
-        # Delete the character
         self.db.delete(character)
         self.db.commit()
         
-        # Delete the associated entity if it exists
         if entity_id:
             self.entity_service.delete_entity(entity_id)
         
         return True
     
     def search_characters(self, 
-                         query: str,
-                         user_id: Optional[str] = None, 
-                         page: int = 1, 
-                         page_size: int = 20,
-                         filters: Dict[str, Any] = None) -> Tuple[List[Character], int, int]:
+                          query_str: str,
+                          user_id: Optional[str] = None, 
+                          page: int = 1, 
+                          page_size: int = 20,
+                          filters: Dict[str, Any] = None) -> Tuple[List[Character], int, int]:
         """
-        Search for characters by name or description
+        Search for characters by name or description.
         
         Args:
-            query: Search term
-            user_id: Filter by user ID (or None to search all)
-            page: Page number
-            page_size: Results per page
-            filters: Additional filters to apply
+            query_str: Search term.
+            user_id: Optionally filter by user ID.
+            page: Page number.
+            page_size: Results per page.
+            filters: Additional filters.
             
         Returns:
-            Tuple of (characters, total_count, total_pages)
+            Tuple of (list of characters, total count, total pages).
         """
         if filters is None:
             filters = {}
             
-        filters['search'] = query
+        filters['search'] = query_str
 
         return self.get_characters(
             filters=filters,
@@ -244,74 +236,74 @@ class CharacterService:
     
     def count_characters(self, user_id: Optional[str] = None) -> int:
         """
-        Count the number of characters
+        Count the number of characters.
         
         Args:
-            user_id: Filter by user ID (or None to count all)
+            user_id: Optionally filter by user ID.
             
         Returns:
-            Count of characters matching criteria
+            Count of characters matching criteria.
         """
         query = self.db.query(func.count(Character.id))
-
+        if user_id:
+            query = query.filter(Character.player_id == user_id)
         return query.scalar() or 0
 
     def move_character_to_zone(self, character_id: str, zone_id: str) -> bool:
         """
-        Move a character to a different zone
+        Move a character to a different zone.
         
         Args:
-            character_id: ID of the character to move
-            zone_id: ID of the destination zone
+            character_id: ID of the character to move.
+            zone_id: ID of the destination zone.
             
         Returns:
-            True if successful, False otherwise
+            True if successful, False otherwise.
         """
         character = self.get_character(character_id)
-        if not character or not character.entity_id:
+        if not character:
             return False
             
-        # Use EntityService to handle the move
+        # Use EntityService to handle the move using the underlying entity id.
         return self.entity_service.move_entity_with_related(
-            entity_id=character.entity_id,
+            entity_id=character.id,
             related_obj=character,
             zone_id=zone_id
         )
         
     def upgrade_character_tier(self, character_id: str) -> bool:
         """
-        Upgrade a character's tier
+        Upgrade a character's tier.
         
         Args:
-            character_id: ID of the character to upgrade
+            character_id: ID of the character to upgrade.
             
         Returns:
-            True if successful, False otherwise
+            True if successful, False otherwise.
         """
         character = self.get_character(character_id)
         if not character:
             return False
             
-        # Increment character tier
+        # Assuming tier is defined on the inherited entity columns.
         character.tier += 1
         
-        # Also upgrade the entity if present
-        if character.entity_id:
-            self.entity_service.upgrade_entity_tier(character.entity_id)
+        if character.id:
+            self.entity_service.upgrade_entity_tier(character.id)
             
         self.db.commit()
         return True
         
     def check_character_owner(self, character_id: str, user_id: str) -> bool:
         """
-        Check if a user owns a character
+        Check if a user owns a character.
         
         Args:
-            character_id: ID of the character to check
-            user_id: ID of the user to check
+            character_id: ID of the character.
+            user_id: ID of the user.
             
         Returns:
-            True if user owns the character, False otherwise
+            True if the user is the owner, False otherwise.
         """
         character = self.get_character(character_id)
         if not character:

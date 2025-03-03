@@ -19,7 +19,10 @@ class EntityBase(BaseModel):
 class EntityResponse(EntityBase):
     """Response model with all entity properties"""
     id: str
-    world_id: Optional[str] = None
+    # Although Entity no longer has a direct world_id column,
+    # you may compute it from the related zone. This assumes that
+    # your ORM model either has a @property for world_id or you inject it.
+    world_id: Optional[str] = None  
     zone_id: Optional[str] = None
     properties: Optional[Dict[str, Any]] = None
     created_at: datetime

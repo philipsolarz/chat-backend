@@ -1,41 +1,42 @@
 # app/api/v1/players.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import Dict
 
 from app.database import get_db
-from app.schemas import PlayerBase, PlayerCreate, PlayerResponse, PlayerUpdate, WorldList, CharacterList
+from app.schemas import PlayerBase, PlayerCreate, PlayerResponse, PlayerUpdate
+from app.schemas import WorldList  # Assumed to be defined elsewhere
+from app.schemas import CharacterList  # Assumed to be defined elsewhere
 from app.api.auth import get_current_user
-from app.services.player_service import PlayerService  # Updated import
+from app.services.player_service import PlayerService
 from app.api.dependencies import get_service
-from app.models.player import Player  # Keep as User for now for compatibility
+from app.models.player import Player  # Our updated Player model
 
 router = APIRouter()
 
 
-@router.get("/me", response_model=PlayerResponse)  # Updated schema name
+@router.get("/me", response_model=PlayerResponse)
 async def get_current_player_info(
     current_user: Player = Depends(get_current_user)
 ):
     """
-    Get information about the current authenticated player
-    
-    Returns the player profile
+    Get information about the current authenticated player.
+    Returns the player's profile.
     """
     return current_user
 
 
-@router.put("/me", response_model=PlayerResponse)  # Updated schema name
+@router.put("/me", response_model=PlayerResponse)
 async def update_player_info(
-    player_update: PlayerUpdate,  # Updated schema name
+    player_update: PlayerUpdate,
     current_user: Player = Depends(get_current_user),
     player_service: PlayerService = Depends(get_service(PlayerService))
 ):
     """
-    Update current player information
-    
-    Returns the updated player profile
+    Update current player information.
+    Returns the updated player's profile.
     """
-    # Check if email is being updated and already exists
+    # Check if the email is being updated and ensure it is not already registered
     if player_update.email and player_update.email != current_user.email:
         existing_player = player_service.get_player_by_email(player_update.email)
         if existing_player:
@@ -45,7 +46,6 @@ async def update_player_info(
             )
     
     update_data = player_update.dict(exclude_unset=True)
-    
     updated_player = player_service.update_player(current_user.id, update_data)
     if not updated_player:
         raise HTTPException(
@@ -62,9 +62,8 @@ async def delete_player_account(
     player_service: PlayerService = Depends(get_service(PlayerService))
 ):
     """
-    Delete current player account
-    
-    Returns no content on success
+    Delete the current player account.
+    Returns no content on success.
     """
     try:
         player_service.delete_player(current_user.id)
@@ -78,14 +77,13 @@ async def delete_player_account(
         )
 
 
-@router.get("/me/stats", response_model=dict)
+@router.get("/me/stats", response_model=Dict)
 async def get_player_stats(
     current_user: Player = Depends(get_current_user),
     player_service: PlayerService = Depends(get_service(PlayerService))
 ):
     """
-    Get statistics about the current player's activity
-    
+    Get statistics about the current player's activity.
     Returns counts of characters, worlds, etc.
     """
     stats = player_service.get_player_stats(current_user.id)
@@ -98,11 +96,9 @@ async def get_player_worlds(
     world_service = Depends(get_service("WorldService"))  # Inject WorldService dynamically
 ):
     """
-    Get all worlds owned by the current player
-    
-    Returns a list of the player's worlds
+    Get all worlds owned by the current player.
+    Returns a list of the player's worlds.
     """
-    # Use world_service to get player's worlds
     worlds, total_count, total_pages = world_service.get_worlds(
         filters={'owner_id': current_user.id},
         page=1,
@@ -124,11 +120,9 @@ async def get_player_characters(
     character_service = Depends(get_service("CharacterService"))  # Inject CharacterService dynamically
 ):
     """
-    Get all characters owned by the current player
-    
-    Returns a list of the player's characters
+    Get all characters owned by the current player.
+    Returns a list of the player's characters.
     """
-    # Use character_service to get player's characters
     characters, total_count, total_pages = character_service.get_characters(
         filters={'player_id': current_user.id},
         page=1,

@@ -1,4 +1,3 @@
-# app/api/v1/entities.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
@@ -11,7 +10,7 @@ from app.services.entity_service import EntityService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
 from app.models.player import Player as User
-from app.models.entity import Entity, EntityType
+from app.models.entity import Entity
 
 router = APIRouter()
 
@@ -20,7 +19,7 @@ router = APIRouter()
 async def list_entities(
     zone_id: Optional[str] = Query(None, description="Filter entities by zone"),
     world_id: Optional[str] = Query(None, description="Filter entities by world"),
-    entity_type: Optional[str] = Query(None, description="Filter by entity type (agent, object, character)"),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type (character, object)"),
     name: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -32,14 +31,13 @@ async def list_entities(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get entities with pagination and filtering
+    Get entities with pagination and filtering.
     
     If zone_id is provided, returns entities in that zone.
     If world_id is provided, returns entities in that world.
     Can be filtered by entity type.
     """
-    # Build filters
-    filters = {}
+    filters: Dict[str, Any] = {}
     
     # Validate zone access if provided
     if zone_id:
@@ -49,14 +47,11 @@ async def list_entities(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Zone not found"
             )
-        
-        # Check world access
         if not world_service.check_user_access(current_user.id, zone.world_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this world"
             )
-        
         filters['zone_id'] = zone_id
     
     # Validate world access if provided
@@ -67,18 +62,14 @@ async def list_entities(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="World not found"
             )
-        
-        # Check world access
         if not world_service.check_user_access(current_user.id, world_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this world"
             )
-        
-        filters['world_id'] = world_id
+        filters['world_id'] = world_id  # This filter will join through Zone in the service
     
     if entity_type:
-        # Validate entity type
         try:
             filters['type'] = EntityType(entity_type)
         except ValueError:
@@ -90,7 +81,6 @@ async def list_entities(
     if name:
         filters['name'] = name
     
-    # Get entities
     entities, total_count, total_pages = entity_service.get_entities(
         filters=filters,
         page=page,
@@ -117,7 +107,7 @@ async def get_entity(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Get details of a specific entity
+    Get details of a specific entity.
     """
     entity = entity_service.get_entity(entity_id)
     if not entity:
@@ -126,20 +116,13 @@ async def get_entity(
             detail="Entity not found"
         )
     
-    # If entity is in a zone or world, check access
-    if entity.zone_id:
-        zone = zone_service.get_zone(entity.zone_id)
-        if zone and not world_service.check_user_access(current_user.id, zone.world_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this entity's world"
-            )
-    elif entity.world_id:
-        if not world_service.check_user_access(current_user.id, entity.world_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this entity's world"
-            )
+    # Every entity is associated with a zone. Check access via the zone.
+    zone = zone_service.get_zone(entity.zone_id)
+    if zone and not world_service.check_user_access(current_user.id, zone.world_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this entity's world"
+        )
     
     return entity
 
@@ -148,19 +131,18 @@ async def get_entity(
 async def move_entity_to_zone(
     entity_id: str,
     zone_id: str = Query(..., description="ID of the destination zone"),
-    entity: Entity = Depends(check_entity_ownership),  # Use new dependency
+    entity: Entity = Depends(check_entity_ownership),  # Dependency that checks ownership
     entity_service: EntityService = Depends(get_service(EntityService)),
     zone_service: ZoneService = Depends(get_service(ZoneService))
 ):
     """
-    Move an entity to a different zone
+    Move an entity to a different zone.
     
     Checks that:
-    1. The entity exists
-    2. The destination zone exists and has capacity based on its tier
-    3. The user has permission to move the entity
+      1. The entity exists.
+      2. The destination zone exists and has capacity.
+      3. The user has permission to move the entity.
     """
-    # Check if destination zone exists
     zone = zone_service.get_zone(zone_id)
     if not zone:
         raise HTTPException(
@@ -168,7 +150,6 @@ async def move_entity_to_zone(
             detail="Destination zone not found"
         )
     
-    # Move the entity
     success = entity_service.move_entity_to_zone(entity_id, zone_id)
     if not success:
         raise HTTPException(
@@ -176,7 +157,6 @@ async def move_entity_to_zone(
             detail=f"Failed to move entity. The zone may have reached its tier-based entity limit (tier {zone.tier})."
         )
     
-    # Return the updated entity
     updated_entity = entity_service.get_entity(entity_id)
     return updated_entity
 
@@ -184,15 +164,14 @@ async def move_entity_to_zone(
 @router.post("/{entity_id}/upgrade-tier", response_model=EntityResponse)
 async def upgrade_entity_tier(
     entity_id: str,
-    entity: Entity = Depends(check_entity_ownership),  # Use new dependency
+    entity: Entity = Depends(check_entity_ownership),  # Dependency that checks ownership
     entity_service: EntityService = Depends(get_service(EntityService))
 ):
     """
-    Upgrade an entity's tier
+    Upgrade an entity's tier.
     
-    Only the world owner can upgrade entity tiers
+    Only the world owner can upgrade entity tiers.
     """
-    # Perform the tier upgrade
     success = entity_service.upgrade_entity_tier(entity_id)
     if not success:
         raise HTTPException(
@@ -200,7 +179,6 @@ async def upgrade_entity_tier(
             detail="Failed to upgrade entity tier"
         )
     
-    # Return the updated entity
     updated_entity = entity_service.get_entity(entity_id)
     return updated_entity
 
@@ -214,9 +192,9 @@ async def delete_entity(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Delete an entity
+    Delete an entity.
     
-    Only the world owner can delete entities
+    Only the world owner can delete entities.
     """
     entity = entity_service.get_entity(entity_id)
     if not entity:
@@ -225,38 +203,24 @@ async def delete_entity(
             detail="Entity not found"
         )
     
-    # Check permissions
-    if entity.zone_id:
-        zone = zone_service.get_zone(entity.zone_id)
-        if zone:
-            world = world_service.get_world(zone.world_id)
-            if not world or world.owner_id != current_user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only the world owner can delete entities"
-                )
-    elif entity.world_id:
-        world = world_service.get_world(entity.world_id)
+    zone = zone_service.get_zone(entity.zone_id)
+    if zone:
+        world = world_service.get_world(zone.world_id)
         if not world or world.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the world owner can delete entities"
             )
     else:
-        # If the entity is not associated with any world or zone, 
-        # we need to decide on the authorization rules.
-        # For now, we won't allow deletion if it's not in a world/zone
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete this entity as it's not part of any world or zone"
         )
     
-    # For character entities, check if they belong to users
+    # If the entity is a character, ensure the user owns it.
     if entity.type == EntityType.CHARACTER:
-        # We need to check if this entity is associated with a character owned by a user
-        # This requires a lookup into the character table
         from app.models.character import Character
-        character = entity_service.db.query(Character).filter(Character.entity_id == entity_id).first()
+        character = entity_service.db.query(Character).filter(Character.id == entity_id).first()
         if character and character.player_id and character.player_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -287,11 +251,10 @@ async def search_entities(
     world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
-    Search for entities by name or description
+    Search for entities by name or description.
     
-    Can be filtered by zone, world, and entity type
+    Can be filtered by zone, world, and entity type.
     """
-    # Validate zone access if provided
     if zone_id:
         zone = zone_service.get_zone(zone_id)
         if not zone:
@@ -299,15 +262,12 @@ async def search_entities(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Zone not found"
             )
-        
-        # Check world access
         if not world_service.check_user_access(current_user.id, zone.world_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this world"
             )
     
-    # Validate world access if provided
     if world_id:
         if not world_service.check_user_access(current_user.id, world_id):
             raise HTTPException(
@@ -315,7 +275,6 @@ async def search_entities(
                 detail="You don't have access to this world"
             )
     
-    # Validate entity type if provided
     entity_type_enum = None
     if entity_type:
         try:
@@ -326,10 +285,10 @@ async def search_entities(
                 detail=f"Invalid entity type: {entity_type}. Must be one of: {', '.join([e.value for e in EntityType])}"
             )
     
-    # Perform search
     entities, total_count, total_pages = entity_service.search_entities(
         query=query,
         zone_id=zone_id,
+        world_id=world_id,
         entity_type=entity_type_enum,
         page=page,
         page_size=page_size
