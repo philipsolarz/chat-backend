@@ -62,15 +62,19 @@ class ZoneService(BaseService):
             return None
     
     async def create_zone(self, world_id: str, name: str, description: str, 
-                         zone_type: Optional[str] = None, 
-                         parent_zone_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Create a new zone"""
+                        zone_type: Optional[str] = None, 
+                        parent_zone_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         try:
+            # Create properties dict that contains zone_type if provided
+            properties = {}
+            if zone_type:
+                properties["zone_type"] = zone_type
+                
             payload = {
                 "world_id": world_id,
                 "name": name,
                 "description": description,
-                "zone_type": zone_type,
+                "properties": properties,  # Use properties instead of zone_type
                 "parent_zone_id": parent_zone_id
             }
             

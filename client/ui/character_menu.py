@@ -137,7 +137,7 @@ class CharacterMenu:
         if not game_state.current_world_id:
             show_error("No world selected")
             return False
-            
+                
         show_title(
             f"Create Character - {game_state.current_world_name}", 
             "Create a new character to play in this world"
@@ -188,7 +188,7 @@ class CharacterMenu:
                 name, 
                 description, 
                 is_public,
-                world_id=game_state.current_world_id,
+                world_id=game_state.current_world_id,  # Pass world_id
                 zone_id=zone_id
             )
         )

@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from client.api.base_service import BaseService, APIError
 from client.game.state import game_state
+from client.ui import console
 
 
 class WorldService(BaseService):
@@ -122,23 +123,34 @@ class WorldService(BaseService):
     async def purchase_premium_world(self, name: str, description: Optional[str] = None, 
                                     genre: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
-        Start premium world purchase process
-        Returns a checkout URL to complete payment
+        Start premium world purchase process.
+        This is a two-step process:
+        1. Create a regular world
+        2. Initiate tier upgrade checkout for that world
         """
         try:
+            # First create a regular world
+            world = await self.create_world(name, description, genre)
+            
+            if not world or "id" not in world:
+                console.print("[bold red]Failed to create base world[/bold red]")
+                return None
+                
+            # Then initiate tier upgrade checkout
             payload = {
-                "name": name,
-                "description": description,
-                "genre": genre,
+                "world_id": world["id"],
                 "success_url": "http://localhost:3000/success",
                 "cancel_url": "http://localhost:3000/cancel"
             }
             
-            result = await self.post("/worlds/premium", payload)
-            return result
-        except APIError as e:
-            print(f"Failed to initiate premium world purchase: {e.detail}")
-            return None
+            result = await self.post("/worlds/tier-upgrade-checkout", payload)
+            
+            if result and "checkout_url" in result:
+                console.print(f"[bold green]Premium world purchase initiated for {name}![/bold green]")
+                return result
+            else:
+                console.print(f"[bold yellow]World '{name}' created, but premium upgrade failed to initiate[/bold yellow]")
+                return {"world_id": world["id"], "error": "Failed to initiate premium upgrade"}
         except Exception as e:
-            print(f"Error initiating premium world purchase: {str(e)}")
+            console.print(f"[bold red]Error initiating premium world purchase: {str(e)}[/bold red]")
             return None
