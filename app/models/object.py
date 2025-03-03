@@ -9,7 +9,7 @@ class Object(Entity):
     id = Column(String(36), ForeignKey("entities.id"), primary_key=True)
     
     object_type = Column(SAEnum(ObjectType), nullable=False)
-    tier = Column(Integer, default=1)
+    # tier = Column(Integer, default=1)
     
     __mapper_args__ = {
         "polymorphic_identity": "object",

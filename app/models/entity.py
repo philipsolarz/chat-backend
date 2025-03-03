@@ -1,5 +1,5 @@
 # app/models/entity.py
-from sqlalchemy import Column, String, Text, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models.mixins import TimestampMixin, generate_uuid
@@ -13,6 +13,8 @@ class Entity(Base, TimestampMixin):
     properties = Column(JSON, nullable=True)
     zone_id = Column(String(36), ForeignKey("zones.id"), nullable=False, index=True)
     type = Column(String(50), nullable=False)
+
+    tier = Column(Integer, nullable=False, default=1)
     
     # Relationships
     zone = relationship("Zone", back_populates="entities")
