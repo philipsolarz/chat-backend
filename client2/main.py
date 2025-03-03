@@ -180,7 +180,7 @@ async def create_character() -> bool:
         ui.show_error("Failed to create character")
         return False
 
-async def enter_chat() -> None:
+async def play_game() -> None:
     """Connect to game chat"""
     if not all([game_state.current_character_id, game_state.current_zone_id]):
         ui.show_error("Character or zone not selected")
@@ -200,9 +200,7 @@ async def enter_chat() -> None:
     if not await client.connect():
         ui.show_error("Failed to connect to chat")
         return
-    
-    ui.show_info("Type your messages below. Type /help for commands.")
-    
+
     # Chat loop
     while not client.shutdown_requested:
         try:
@@ -215,13 +213,8 @@ async def enter_chat() -> None:
             if message.startswith('/'):
                 if message.lower() in ['/exit', '/quit']:
                     break
-                
-                handled = await client.process_command(message)
-                if not handled:
-                    # Command not recognized, send as regular message
-                    await client.send_message(message)
+                await client.send_message(message)
             else:
-                # Regular message
                 await client.send_message(message)
         
         except KeyboardInterrupt:
@@ -257,7 +250,7 @@ async def main() -> None:
         return
     
     # Step 4: Enter the world and start chatting
-    await enter_chat()
+    await play_game()
     
     ui.show_info("Thank you for playing RPG Chat!")
 
