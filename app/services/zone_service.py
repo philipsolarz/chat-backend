@@ -426,3 +426,27 @@ class ZoneService:
         }
         
         return result
+
+    def get_default_starting_zone(self, world_id: str) -> Optional[Zone]:
+        """
+        Get the default starting zone for a world.
+        Currently selects the first top-level zone with capacity.
+        """
+        # Get all top-level zones (zones without a parent) for this world
+        top_level_zones = self.db.query(Zone).filter(
+            Zone.world_id == world_id,
+            Zone.parent_zone_id.is_(None)
+        ).all()
+        
+        # Check each zone for capacity
+        for zone in top_level_zones:
+            if self.can_add_entity_to_zone(zone.id):
+                return zone
+        
+        # If no top-level zones have capacity, try any zone in the world
+        all_zones = self.db.query(Zone).filter(Zone.world_id == world_id).all()
+        for zone in all_zones:
+            if self.can_add_entity_to_zone(zone.id):
+                return zone
+        
+        return None

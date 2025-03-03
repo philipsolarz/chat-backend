@@ -25,33 +25,63 @@ from app.models.character import Character, CharacterType
 
 router = APIRouter()
 
-
 @router.post("/", response_model=CharacterResponse, status_code=status.HTTP_201_CREATED)
 async def create_character(
     character: CharacterCreate,
     user_with_capacity: User = Depends(check_character_limit),
     character_service: CharacterService = Depends(get_service(CharacterService)),
     usage_service: UsageService = Depends(get_service(UsageService)),
-    zone_service: ZoneService = Depends(get_service(ZoneService))
+    zone_service: ZoneService = Depends(get_service(ZoneService)),
+    world_service: WorldService = Depends(get_service(WorldService))
 ):
     """
     Create a new character for the current user.
     
-    If a zone_id is provided, the endpoint checks that the zone exists and has capacity.
+    Requires world_id. If zone_id is not provided, a default starting zone for the world will be used.
     Returns the created character.
     """
-    if character.zone_id:
-        zone = zone_service.get_zone(character.zone_id)
+    # Verify the world exists
+    world = world_service.get_world(character.world_id)
+    if not world:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="World not found"
+        )
+    
+    # If zone_id is provided, verify it exists and has capacity
+    zone_id = character.zone_id
+    if zone_id:
+        zone = zone_service.get_zone(zone_id)
         if not zone:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Zone not found"
             )
-        if not zone_service.can_add_entity_to_zone(character.zone_id):
+        # Verify zone belongs to the specified world
+        if zone.world_id != character.world_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Zone does not belong to the specified world"
+            )
+        if not zone_service.can_add_entity_to_zone(zone_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Zone has reached its entity limit for tier {zone.tier}. Upgrade the zone tier to add more entities."
             )
+    else:
+        # Get default starting zone for the world
+        default_zone = zone_service.get_default_starting_zone(character.world_id)
+        if not default_zone:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Could not find a default starting zone for this world"
+            )
+        if not zone_service.can_add_entity_to_zone(default_zone.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Default starting zone has reached its entity limit for tier {default_zone.tier}. Try specifying a different zone."
+            )
+        zone_id = default_zone.id
     
     # Track character creation for usage metrics.
     usage_service.track_character_created(user_with_capacity.id)
@@ -60,7 +90,8 @@ async def create_character(
         user_id=user_with_capacity.id,
         name=character.name,
         description=character.description,
-        zone_id=character.zone_id
+        zone_id=zone_id,
+        world_id=character.world_id
     )
     
     if not new_character:
