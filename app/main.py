@@ -69,12 +69,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-@app.websocket("/ws/worlds/{world_id}")
+@app.websocket("/ws/game/{world_id}/{character_id}")
 async def game_websocket_endpoint(
     websocket: WebSocket,
     world_id: str,
     character_id: str,
-    zone_id: str,
     access_token: str,
     db: Session = Depends(get_db)
 ):
@@ -93,8 +92,7 @@ async def game_websocket_endpoint(
         websocket=websocket,
         world_id=world_id,
         character_id=character_id,
-        zone_id=zone_id,
-        token=access_token,
+        access_token=access_token,
         db=db
     )
 

@@ -1,43 +1,75 @@
+from enum import Enum
 import json
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, Callable, Awaitable
 
 from fastapi import WebSocket
+from pydantic import BaseModel
+from app.ai.agent_manager import AgentManager
 from app.websockets.connection_manager import connection_manager
 import logging
 
 logger = logging.getLogger(__name__)
 
+class EventType(str, Enum):
+    SYSTEM = "system"
+    SUCCESS = "success"
+    WARNING = "warning"
+    ERROR = "error"
+    MESSAGE = "message"
+
+class Event(BaseModel):
+    type: EventType
+    content: str
+    timestamp: datetime
+    
 class EventDispatcher:
     """Dispatches WebSocket events to appropriate handlers based on event type."""
     
     def __init__(self):
-        self.handlers: Dict[str, Callable[..., Awaitable[None]]] = {}
+        self.handlers: Dict[EventType, Callable[..., Awaitable[None]]] = {}
     
-    def register_handler(self, event_type: str, handler: Callable[..., Awaitable[None]]):
+    def register_handler(
+            self, 
+            event_type: EventType, 
+            handler: Callable[..., Awaitable[None]]
+    ):
         self.handlers[event_type] = handler
     
-    async def dispatch(self, websocket: WebSocket, event_data: dict, agent_manager: Any, world_id: str, character_id: str):
-        event_type = event_data.get("type")
+    async def dispatch(
+            self, 
+            websocket: WebSocket, 
+            event: Event, 
+            agent_manager: AgentManager, 
+            world_id: str, 
+            character_id: str
+    ):
+        event_type = event.type
         handler = self.handlers.get(event_type)
         if handler:
             try:
-                await handler(websocket, event_data, agent_manager, world_id, character_id)
+                await handler(websocket, event, agent_manager, world_id, character_id)
             except Exception as e:
                 logger.error(f"Error in event handler for {event_type}: {str(e)}")
-                await websocket.send_json({
-                    "type": "error",
-                    "error": f"Error processing {event_type}: {str(e)}",
-                    "timestamp": datetime.now().isoformat()
-                })
+                await connection_manager.send_event(
+                    websocket,
+                    Event(
+                        type=EventType.ERROR,
+                        content=f"Error processing {event_type}: {str(e)}",
+                        timestamp=datetime.now()
+                    )
+                )
         else:
             logger.warning(f"No handler registered for event type: {event_type}")
-            await websocket.send_json({
-                "type": "error",
-                "error": f"Unknown event type: {event_type}",
-                "timestamp": datetime.now().isoformat()
-            })
+            await connection_manager.send_event(
+                websocket,
+                Event(
+                    type=EventType.ERROR,
+                    content=f"Unknown event type: {event_type}",
+                    timestamp=datetime.now()
+                )
+            )
 
 class EventRegistry:
     """Registry for all supported event handlers."""
@@ -47,60 +79,110 @@ class EventRegistry:
         self._setup_handlers()
     
     def _setup_handlers(self):
-        # Register supported event handlers
         self.dispatcher.register_handler("message", self.handle_message)
-        self.dispatcher.register_handler("ping", self.handle_ping)
-        # Dummy: you could add a "usage" or other event types here.
-        # For example, add a "reach" field (e.g., "global", "zone_id", or "private")
-        # to outgoing payloads if needed; for now, all messages are global.
-    
-    async def handle_message(self, websocket: WebSocket, event_data: dict, agent_manager: Any, world_id: str, character_id: str):
-        """Handle message events.
-        
-        All messages coming from the client are processed through the GameMaster.
-        If the agent_manager.process_game_master_message returns True, it is interpreted
-        as a question and a system event is sent to the client with "This is a question".
-        Otherwise, the message is broadcast globally.
-        """
-        content = event_data.get("content", "").strip()
+        # self.dispatcher.register_handler("ping", self.handle_ping)
+
+    async def handle_message(
+            self,
+            websocket: WebSocket,
+            event: Event,
+            agent_manager: AgentManager,
+            world_id: str,
+            character_id: str
+    ):
+        content = event.content
         if not content:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Message content cannot be empty",
-                "timestamp": datetime.now().isoformat()
-            })
+            await connection_manager.send_event(
+                websocket,
+                Event(
+                    type=EventType.ERROR,
+                    content="Message content cannot be empty",
+                    timestamp=datetime.now()
+                )
+            )
             return
         
-        # Process the message through the GameMaster.
         is_question = await agent_manager.process_game_master_message(content)
-        print(is_question)
-        if is_question.is_question:
-            payload = {
-                "type": "system",
-                "content": "This is a question",
-                "timestamp": datetime.now().isoformat(),
-                # "reach": "global"  # Dummy field; all messages are global for now.
-            }
-            await connection_manager.broadcast_to_world(world_id, payload)
-        else:
-            payload = {
-                "type": "message",
-                "character_id": character_id,
-                "content": content,
-                "timestamp": datetime.now().isoformat(),
-                # "reach": "global"  # Dummy field; all messages are global for now.
-            }
-            # Broadcast the message to all connected clients.
-            await connection_manager.broadcast_to_world(world_id, payload)
+        if is_question:
+            await connection_manager.broadcast_to_all(
+                Event(
+                    type=EventType.SUCCESS,
+                    content="The players message is a question.",
+                    timestamp=datetime.now()
+                )
+            )
+        
+        await connection_manager.broadcast_to_all(
+            Event(
+                type=EventType.MESSAGE,
+                content=content,
+                timestamp=datetime.now()
+            )
+        )
+
+    # async def handle_ping(
+    #         self, 
+    #         websocket: WebSocket, 
+    #         event: Event, 
+    #         agent_manager: AgentManager, 
+    #         character_id: str
+    # ):
+    #     await
+    #     """Respond to ping events with a pong."""
+    #     payload = {
+    #         "type": "pong",
+    #         "timestamp": datetime.now().isoformat(),
+    #         # "reach": "global"  # Dummy field.
+    #     }
+    #     await websocket.send_json(payload)
     
-    async def handle_ping(self, websocket: WebSocket, event_data: dict, agent_manager: Any, character_id: str):
-        """Respond to ping events with a pong."""
-        payload = {
-            "type": "pong",
-            "timestamp": datetime.now().isoformat(),
-            # "reach": "global"  # Dummy field.
-        }
-        await websocket.send_json(payload)
+    # async def handle_message(self, websocket: WebSocket, event_data: dict, agent_manager: Any, world_id: str, character_id: str):
+    #     """Handle message events.
+        
+    #     All messages coming from the client are processed through the GameMaster.
+    #     If the agent_manager.process_game_master_message returns True, it is interpreted
+    #     as a question and a system event is sent to the client with "This is a question".
+    #     Otherwise, the message is broadcast globally.
+    #     """
+    #     content = event_data.get("content", "").strip()
+    #     if not content:
+    #         await websocket.send_json({
+    #             "type": "error",
+    #             "error": "Message content cannot be empty",
+    #             "timestamp": datetime.now().isoformat()
+    #         })
+    #         return
+        
+    #     # Process the message through the GameMaster.
+    #     is_question = await agent_manager.process_game_master_message(content)
+    #     print(is_question)
+    #     if is_question.is_question:
+    #         payload = {
+    #             "type": "system",
+    #             "content": "This is a question",
+    #             "timestamp": datetime.now().isoformat(),
+    #             # "reach": "global"  # Dummy field; all messages are global for now.
+    #         }
+    #         await connection_manager.broadcast_to_world(world_id, payload)
+    #     else:
+    #         payload = {
+    #             "type": "message",
+    #             "character_id": character_id,
+    #             "content": content,
+    #             "timestamp": datetime.now().isoformat(),
+    #             # "reach": "global"  # Dummy field; all messages are global for now.
+    #         }
+    #         # Broadcast the message to all connected clients.
+    #         await connection_manager.broadcast_to_world(world_id, payload)
+    
+    # async def handle_ping(self, websocket: WebSocket, event_data: dict, agent_manager: Any, character_id: str):
+    #     """Respond to ping events with a pong."""
+    #     payload = {
+    #         "type": "pong",
+    #         "timestamp": datetime.now().isoformat(),
+    #         # "reach": "global"  # Dummy field.
+    #     }
+    #     await websocket.send_json(payload)
 
 # Global event registry instance.
 event_registry = EventRegistry()

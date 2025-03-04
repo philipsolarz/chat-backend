@@ -117,7 +117,7 @@ class AgentManager:
             
             result = await agent.run(message, deps=deps)
             print(result.data)
-            return result.data
+            return result.data.is_question
             
         except Exception as e:
             logger.error(f"Error processing game master message: {str(e)}")

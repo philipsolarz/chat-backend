@@ -7,6 +7,16 @@ from client2.config import config
 from client2.state import game_state
 from client2 import ui
 
+class GameClient:
+    def __init__(self, world_id: str, character_id: str):
+        self.world_id = world_id
+        self.character_id = character_id
+        self.connection = None
+
+    async def connect(self) -> bool:
+        pass
+        # url = 
+        # self.connection = websockets.connect(url)
 class ChatClient:
     """Simplified WebSocket chat client for RPG Client supporting system, message, error, pong, and usage events."""
     
@@ -25,8 +35,8 @@ class ChatClient:
         
         try:
             # Build the WebSocket URL
-            ws_url = f"{config.ws_url}/worlds/{game_state.current_world_id}"
-            ws_url += f"?character_id={self.character_id}&zone_id={self.zone_id}&access_token={game_state.access_token}"
+            ws_url = f"{config.ws_url}/game/{game_state.current_world_id}/{self.character_id}"
+            ws_url += f"access_token={game_state.access_token}"
             
             ui.show_system_message("system: Connecting to game server...")
             self.websocket = await websockets.connect(ws_url, ping_interval=30, ping_timeout=10)
