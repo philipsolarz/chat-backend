@@ -5,6 +5,8 @@ from typing import List, Dict, Any, Optional, Callable, TypeVar
 from getpass import getpass
 from datetime import datetime
 
+import aioconsole
+
 T = TypeVar('T')
 
 # ANSI color codes
@@ -148,10 +150,7 @@ def show_chat_message(sender: str, content: str, is_self: bool = False) -> None:
     else:
         print(f"{GREEN}[{timestamp}] {sender}{RESET}: {content}")
 
-def show_emote(emote_text: str) -> None:
-    """Display an emote in chat"""
-    print(f"{YELLOW}* {emote_text} *{RESET}")
-
-def get_input() -> str:
+async def get_input() -> str:
     """Get user input for chat"""
-    return input(f"{GRAY}> {RESET}")
+    return await aioconsole.ainput(f"{GRAY}> {RESET}")
+    # return input(f"{GRAY}> {RESET}")
