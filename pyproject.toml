@@ -16,4 +16,5 @@ dependencies = [
     "stripe>=11.6.0",
     "openai>=1.65.1",
     "pydantic-ai>=0.0.30",
+    "aioconsole>=0.8.1",
 ]

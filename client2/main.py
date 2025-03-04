@@ -204,7 +204,7 @@ async def play_game() -> None:
     # Chat loop
     while not client.shutdown_requested:
         try:
-            message = ui.get_input()
+            message = await ui.get_input()
             
             if not message:
                 continue

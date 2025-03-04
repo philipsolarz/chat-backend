@@ -1,3 +1,5 @@
+# client2/chat.py
+
 import asyncio
 import json
 import websockets
@@ -36,7 +38,7 @@ class ChatClient:
         try:
             # Build the WebSocket URL
             ws_url = f"{config.ws_url}/game/{game_state.current_world_id}/{self.character_id}"
-            ws_url += f"access_token={game_state.access_token}"
+            ws_url += f"?access_token={game_state.access_token}"
             
             ui.show_system_message("system: Connecting to game server...")
             self.websocket = await websockets.connect(ws_url, ping_interval=30, ping_timeout=10)
@@ -90,7 +92,6 @@ class ChatClient:
         except json.JSONDecodeError:
             ui.show_system_message(f"error: Failed to decode event: {event}")
             return
-        
         event_type = data.get("type")
         if event_type == "system":
             await self._handle_system(data)

@@ -2,12 +2,11 @@ from enum import Enum
 import json
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Dict, Any, Callable, Awaitable
 
 from fastapi import WebSocket
 from pydantic import BaseModel
 from app.ai.agent_manager import AgentManager
-from app.websockets.connection_manager import connection_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,8 @@ class Event(BaseModel):
 class EventDispatcher:
     """Dispatches WebSocket events to appropriate handlers based on event type."""
     
-    def __init__(self):
+    def __init__(self, connection_manager):
+        self.connection_manager = connection_manager
         self.handlers: Dict[EventType, Callable[..., Awaitable[None]]] = {}
     
     def register_handler(
@@ -52,7 +52,7 @@ class EventDispatcher:
                 await handler(websocket, event, agent_manager, world_id, character_id)
             except Exception as e:
                 logger.error(f"Error in event handler for {event_type}: {str(e)}")
-                await connection_manager.send_event(
+                await self.connection_manager.send_event(
                     websocket,
                     Event(
                         type=EventType.ERROR,
@@ -62,7 +62,7 @@ class EventDispatcher:
                 )
         else:
             logger.warning(f"No handler registered for event type: {event_type}")
-            await connection_manager.send_event(
+            await self.connection_manager.send_event(
                 websocket,
                 Event(
                     type=EventType.ERROR,
@@ -74,8 +74,8 @@ class EventDispatcher:
 class EventRegistry:
     """Registry for all supported event handlers."""
     
-    def __init__(self):
-        self.dispatcher = EventDispatcher()
+    def __init__(self, connection_manager):
+        self.dispatcher = EventDispatcher(connection_manager)
         self._setup_handlers()
     
     def _setup_handlers(self):
@@ -92,7 +92,7 @@ class EventRegistry:
     ):
         content = event.content
         if not content:
-            await connection_manager.send_event(
+            await self.dispatcher.connection_manager.send_event(
                 websocket,
                 Event(
                     type=EventType.ERROR,
@@ -104,7 +104,7 @@ class EventRegistry:
         
         is_question = await agent_manager.process_game_master_message(content)
         if is_question:
-            await connection_manager.broadcast_to_all(
+            await self.dispatcher.connection_manager.broadcast_to_all(
                 Event(
                     type=EventType.SUCCESS,
                     content="The players message is a question.",
@@ -112,13 +112,15 @@ class EventRegistry:
                 )
             )
         
-        await connection_manager.broadcast_to_all(
+        await self.dispatcher.connection_manager.broadcast_to_all(
             Event(
                 type=EventType.MESSAGE,
                 content=content,
                 timestamp=datetime.now()
             )
         )
+
+
 
     # async def handle_ping(
     #         self, 
@@ -184,8 +186,8 @@ class EventRegistry:
     #     }
     #     await websocket.send_json(payload)
 
-# Global event registry instance.
-event_registry = EventRegistry()
+# # Global event registry instance.
+# event_registry = EventRegistry()
 
 
 

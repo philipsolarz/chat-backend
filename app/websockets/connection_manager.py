@@ -4,10 +4,10 @@ from collections import defaultdict
 from enum import Enum
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set
 from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.database import get_db
 # from app.schemas.events import EventScope, EventType, GameEventBase
@@ -17,7 +17,7 @@ from app.services.character_service import CharacterService
 from app.services.player_service import PlayerService
 from app.services.zone_service import ZoneService
 from app.services.world_service import WorldService
-from app.websockets.event_dispatcher import event_registry
+from app.websockets.event_dispatcher import EventRegistry
 from app.ai.agent_manager import AgentManager
 from datetime import datetime
 logger = logging.getLogger(__name__)
@@ -32,7 +32,8 @@ class EventType(str, Enum):
 class Event(BaseModel):
     type: EventType
     content: str
-    timestamp: datetime
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 class ConnectionManager:
     def __init__(self):
@@ -58,6 +59,7 @@ class ConnectionManager:
 
     async def broadcast_to_all(self, event: Event):
         for websocket in self.connections.values():
+            print("Broadcasting to all!")
             await websocket.send_json(event.model_dump_json())
 
     async def send_event(self, websocket: WebSocket, event: Event):
@@ -69,6 +71,7 @@ class ConnectionManager:
             await self.disconnect(websocket)
 
 connection_manager = ConnectionManager()
+event_registry = EventRegistry(connection_manager)
 
 async def authenticate(
     websocket: WebSocket,
@@ -170,7 +173,7 @@ async def handle_game_connection(
     event_service = EventService(db)
     agent_manager = AgentManager(db)
 
-    if not authenticate(
+    if not await authenticate(
         websocket, 
         access_token, 
         world_id, 
@@ -185,7 +188,8 @@ async def handle_game_connection(
 
     try:
         while True:
-            data = websocket.receive_json()
+            data = await websocket.receive_json()
+            print(data)
             event = Event(**data)
             await event_registry.dispatcher.dispatch(
                 websocket=websocket,
