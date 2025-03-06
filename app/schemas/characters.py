@@ -33,7 +33,7 @@ class CharacterUpdate(BaseModel):
 class CharacterResponse(CharacterBase):
     id: str
     player_id: Optional[str] = None
-    zone_id: str  # Inherited from Entity
+    zone_id: str
     character_type: CharacterType
     tier: int
     created_at: datetime

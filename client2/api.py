@@ -111,6 +111,18 @@ def refresh_token() -> bool:
     except Exception:
         return False
 
+def get_user_profile() -> Optional[Dict[str, Any]]:
+    """Get current user profile (for token validation)"""
+    try:
+        response = requests.get(f"{config.api_url}/users/me", headers=get_headers())
+        return handle_response(response)
+    except APIError as e:
+        ui.show_error(f"Failed to get user profile: {e.detail}")
+        return None
+    except Exception as e:
+        ui.show_error(f"Error getting user profile: {str(e)}")
+        return None
+    
 # World API
 
 def get_worlds() -> List[Dict[str, Any]]:
@@ -124,19 +136,6 @@ def get_worlds() -> List[Dict[str, Any]]:
         return []
     except Exception as e:
         ui.show_error(f"Error getting worlds: {str(e)}")
-        return []
-
-def get_starter_worlds() -> List[Dict[str, Any]]:
-    """Get list of starter worlds"""
-    try:
-        response = requests.get(f"{config.api_url}/worlds/starter", headers=get_headers())
-        data = handle_response(response)
-        return data.get("items", [])
-    except APIError as e:
-        ui.show_error(f"Failed to get starter worlds: {e.detail}")
-        return []
-    except Exception as e:
-        ui.show_error(f"Error getting starter worlds: {str(e)}")
         return []
 
 def create_world(name: str, description: Optional[str] = None, genre: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -176,12 +175,27 @@ def get_world(world_id: str) -> Optional[Dict[str, Any]]:
 
 # Character API
 
-def get_characters() -> List[Dict[str, Any]]:
-    """Get list of user's characters"""
+def get_characters(world_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get list of user's characters, optionally filtered by world_id"""
     try:
-        response = requests.get(f"{config.api_url}/characters/", headers=get_headers())
+        params = {}
+        if world_id:
+            params["world_id"] = world_id
+            
+        response = requests.get(f"{config.api_url}/characters/", params=params, headers=get_headers())
         data = handle_response(response)
-        return data.get("items", [])
+        
+        # Debug: print the raw response data
+        print(f"Characters API response: {data}")
+        
+        characters = data.get("items", [])
+        print(f"Found {len(characters)} characters")
+        
+        # Check each character's structure
+        for char in characters:
+            print(f"Character: {char.get('name', 'Unknown')} - World ID: {char.get('world_id', 'None')}")
+            
+        return characters
     except APIError as e:
         ui.show_error(f"Failed to get characters: {e.detail}")
         return []

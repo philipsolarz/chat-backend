@@ -74,14 +74,15 @@ async def auto_login() -> bool:
     # Set auth data in state
     game_state.set_auth(auth_data)
     
-    # Test if token is valid with user info endpoint
+    # Test if token is valid with user profile endpoint
     try:
-        me_response = api.get_character(auth_data.get("user_id", ""))
+        # Use a proper user profile endpoint instead of get_character
+        me_response = api.get_user_profile()
         if me_response:
             ui.show_success(f"Automatically logged in as {game_state.user_email}")
             return True
-    except:
-        pass
+    except Exception as e:
+        print(f"Auto-login validation error: {str(e)}")
     
     # Try to refresh token if direct validation failed
     if api.refresh_token():

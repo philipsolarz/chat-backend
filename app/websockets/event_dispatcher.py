@@ -1,11 +1,12 @@
 from enum import Enum
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Any, Callable, Awaitable
 
 from fastapi import WebSocket
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from app.ai.character_agent import character_agent
 from app.ai.agent_manager import AgentManager
 import logging
 
@@ -21,7 +22,10 @@ class EventType(str, Enum):
 class Event(BaseModel):
     type: EventType
     content: str
-    timestamp: datetime
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
     
 class EventDispatcher:
     """Dispatches WebSocket events to appropriate handlers based on event type."""
@@ -56,8 +60,7 @@ class EventDispatcher:
                     websocket,
                     Event(
                         type=EventType.ERROR,
-                        content=f"Error processing {event_type}: {str(e)}",
-                        timestamp=datetime.now()
+                        content=f"Error processing {event_type}: {str(e)}"
                     )
                 )
         else:
@@ -66,8 +69,7 @@ class EventDispatcher:
                 websocket,
                 Event(
                     type=EventType.ERROR,
-                    content=f"Unknown event type: {event_type}",
-                    timestamp=datetime.now()
+                    content=f"Unknown event type: {event_type}"
                 )
             )
 
@@ -96,29 +98,36 @@ class EventRegistry:
                 websocket,
                 Event(
                     type=EventType.ERROR,
-                    content="Message content cannot be empty",
-                    timestamp=datetime.now()
+                    content="Message content cannot be empty"
                 )
             )
             return
         
-        is_question = await agent_manager.process_game_master_message(content)
-        if is_question:
+        response = await character_agent.run(content)
+        if response:
             await self.dispatcher.connection_manager.broadcast_to_all(
-                Event(
-                    type=EventType.SUCCESS,
-                    content="The players message is a question.",
-                    timestamp=datetime.now()
-                )
+                response.data
+                # Event(
+                #     type=EventType.SUCCESS,
+                #     content=response
+                # )
             )
         
-        await self.dispatcher.connection_manager.broadcast_to_all(
-            Event(
-                type=EventType.MESSAGE,
-                content=content,
-                timestamp=datetime.now()
-            )
-        )
+        # is_question = await agent_manager.process_game_master_message(content)
+        # if is_question:
+        #     await self.dispatcher.connection_manager.broadcast_to_all(
+        #         Event(
+        #             type=EventType.SUCCESS,
+        #             content="The players message is a question."
+        #         )
+        #     )
+        
+        # await self.dispatcher.connection_manager.broadcast_to_all(
+        #     Event(
+        #         type=EventType.MESSAGE,
+        #         content=content
+        #     )
+        # )
 
 
 
