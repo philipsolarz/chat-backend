@@ -33,7 +33,9 @@ class Event(BaseModel):
     type: EventType
     content: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
+    
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 class ConnectionManager:
     def __init__(self):
@@ -59,12 +61,11 @@ class ConnectionManager:
 
     async def broadcast_to_all(self, event: Event):
         for websocket in self.connections.values():
-            print("Broadcasting to all!")
-            await websocket.send_json(event.model_dump_json())
+            await websocket.send_text(event.model_dump_json())
 
     async def send_event(self, websocket: WebSocket, event: Event):
         try:
-            await websocket.send_json(event.model_dump_json())
+            await websocket.send_text(event.model_dump_json())
         except WebSocketDisconnect:
             await self.disconnect(websocket)
         except Exception:

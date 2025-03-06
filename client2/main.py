@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 import signal
+from time import sleep
 from typing import Dict, Any, List, Optional
 
 from client2 import auth, api, chat, ui
@@ -83,11 +84,13 @@ async def select_character() -> bool:
         return False
     
     # Get characters in current world
-    all_characters = api.get_characters()
-    world_characters = [c for c in all_characters if c.get("world_id") == game_state.current_world_id]
+    ui.show_info(f"Current world ID: {game_state.current_world_id}")
+    characters = api.get_characters(game_state.current_world_id)
+
+    ui.show_info(f"Found {len(characters)} character(s) in current world")
     
     # If no characters, create one
-    if not world_characters:
+    if not characters:
         ui.show_info("You don't have any characters in this world.")
         return await create_character()
     
@@ -108,8 +111,8 @@ async def select_character() -> bool:
         
     if choice == "1":  # Select existing
         character = ui.select_item(
-            world_characters, 
-            lambda c: f"{c['name']} ({c.get('description', '')[:30]}...)",
+            characters, 
+            lambda c: f"{c['name']} ({c.get('description', '')[:30] if c.get('description') else 'No description'})",
             "Select a Character"
         )
         

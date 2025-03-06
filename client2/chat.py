@@ -40,20 +40,20 @@ class ChatClient:
             ws_url = f"{config.ws_url}/game/{game_state.current_world_id}/{self.character_id}"
             ws_url += f"?access_token={game_state.access_token}"
             
-            ui.show_system_message("system: Connecting to game server...")
+            ui.show_system_message("Connecting to game server...")
             self.websocket = await websockets.connect(ws_url, ping_interval=30, ping_timeout=10)
             self.connected = True
-            ui.show_system_message("system: Connected to game server!")
+            ui.show_success("Connected to game server!")
             
             # Start listening for events
             asyncio.create_task(self._listen_for_events())
             return True
         
         except websockets.exceptions.ConnectionClosed:
-            ui.show_system_message("error: Connection closed by server")
+            ui.show_error("Connection closed by server")
             return False
         except Exception as e:
-            ui.show_system_message(f"error: Connection error: {str(e)}")
+            ui.show_error(f"Connection error: {str(e)}")
             return False
     
     async def disconnect(self) -> None:
@@ -77,16 +77,16 @@ class ChatClient:
                 except asyncio.TimeoutError:
                     continue
                 except websockets.exceptions.ConnectionClosed:
-                    ui.show_system_message("error: Connection closed by server")
+                    ui.show_error("Connection closed by server")
                     self.connected = False
                     break
         except Exception as e:
-            ui.show_system_message(f"error: Error in WebSocket listener: {str(e)}")
+            ui.show_error(f"Error in WebSocket listener: {str(e)}")
             self.connected = False
     
     async def _process_event(self, event: str) -> None:
         """Process a message received from the server."""
-        ui.show_system_message(f"{event}")
+        # ui.show_system_message(f"{event}")
         try:
             data = json.loads(event)
         except json.JSONDecodeError:
@@ -97,6 +97,10 @@ class ChatClient:
             await self._handle_system(data)
         elif event_type == "message":
             await self._handle_message(data)
+        elif event_type == "success":
+            await self._handle_success(data)
+        elif event_type == "warning":
+            await self._handle_warning(data)
         elif event_type == "error":
             await self._handle_error(data)
         elif event_type == "pong":
@@ -109,32 +113,42 @@ class ChatClient:
     async def _handle_system(self, data: Dict[str, Any]) -> None:
         """Handle system events."""
         content = data.get("content", "")
-        ui.show_system_message(f"system: {content}")
+        ui.show_system_message(content)
     
     async def _handle_message(self, data: Dict[str, Any]) -> None:
         """Handle message events."""
         content = data.get("content", "")
-        ui.show_system_message(f"message: {content}")
-    
+        ui.show_chat_message("unknown", content)
+
+    async def _handle_success(self, data: Dict[str, Any]) -> None:
+        """Handle success events."""
+        content = data.get("content", "")
+        ui.show_success(content)
+
+    async def _handle_warning(self, data: Dict[str, Any]) -> None:
+        """Handle warning events."""
+        content = data.get("content", "")
+        ui.show_warning(content)
+
     async def _handle_error(self, data: Dict[str, Any]) -> None:
         """Handle error events."""
         error_msg = data.get("error", "Unknown error")
-        ui.show_system_message(f"error: {error_msg}")
+        ui.show_error(error_msg)
     
     async def _handle_pong(self, data: Dict[str, Any]) -> None:
         """Handle pong events."""
         content = data.get("content", "pong")
-        ui.show_system_message(f"pong: {content}")
+        ui.show_system_message({content})
     
     async def _handle_usage(self, data: Dict[str, Any]) -> None:
         """Handle usage events."""
         content = data.get("content", "")
-        ui.show_system_message(f"usage: {content}")
+        ui.show_info({content})
     
     async def send_message(self, content: str) -> bool:
         """Send a chat message to the server."""
         if not self.websocket or not self.connected:
-            ui.show_system_message("error: Not connected to game server")
+            ui.show_error("Not connected to game server")
             return False
         
         try:
@@ -142,7 +156,7 @@ class ChatClient:
             await self.websocket.send(json.dumps(message))
             return True
         except Exception as e:
-            ui.show_system_message(f"error: Error sending message: {str(e)}")
+            ui.show_error(f"Error sending message: {str(e)}")
             return False
 
 
