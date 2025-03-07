@@ -1,5 +1,5 @@
 """
-Simple example game using the Agentique Game Engine.
+Example game using the refactored Agentique Game Engine with GameMaster architecture.
 """
 import asyncio
 import os
@@ -7,12 +7,14 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
+from typing import List, Tuple, Dict
 
 from base_models import (
-    World, Zone, NPC, Player, Object, Item, Event, EventType
+    World, Zone, Character, Object, Item, Event, EventType
 )
 
-from game_engine import SimpleGameEngine
+from game_engine import GameEngine
+from event_system import EventBus
 
 # Load environment variables for API keys
 load_dotenv()
@@ -20,12 +22,10 @@ load_dotenv()
 # Setup console
 console = Console()
 
-async def create_fantasy_game() -> SimpleGameEngine:
+async def create_fantasy_world() -> Tuple[World, List[Character]]:
     """Create a simple fantasy game world"""
-    engine = SimpleGameEngine()
-    
     # Create the world
-    engine.create_world("Mythoria", "A land of magic and adventure")
+    world = World(name="Mythoria", description="A land of magic and adventure")
     
     # Create zones
     village_square = Zone(
@@ -54,17 +54,17 @@ async def create_fantasy_game() -> SimpleGameEngine:
     )
     
     # Add zones to the world
-    engine.add_zone(village_square)
-    engine.add_zone(forest_path)
-    engine.add_zone(tavern)
-    engine.add_zone(riverside)
-    engine.add_zone(cave_entrance)
+    world.add_zone(village_square)
+    world.add_zone(forest_path)
+    world.add_zone(tavern)
+    world.add_zone(riverside)
+    world.add_zone(cave_entrance)
     
     # Connect zones
-    engine.connect_zones(village_square.id, tavern.id)
-    engine.connect_zones(village_square.id, forest_path.id)
-    engine.connect_zones(forest_path.id, riverside.id)
-    engine.connect_zones(forest_path.id, cave_entrance.id)
+    world.connect_zones(village_square.id, tavern.id)
+    world.connect_zones(village_square.id, forest_path.id)
+    world.connect_zones(forest_path.id, riverside.id)
+    world.connect_zones(forest_path.id, cave_entrance.id)
     
     # Create items
     sword = Item(
@@ -98,43 +98,58 @@ async def create_fantasy_game() -> SimpleGameEngine:
     )
     
     # Add items to the world's registry
-    engine.add_item(sword)
-    engine.add_item(potion)
-    engine.add_item(map_item)
-    engine.add_item(amulet)
-    engine.add_item(apple)
+    world.add_item(sword)
+    world.add_item(potion)
+    world.add_item(map_item)
+    world.add_item(amulet)
+    world.add_item(apple)
     
-    # Create NPCs
-    innkeeper = NPC(
+    # Create characters
+    
+    # AI-controlled characters
+    innkeeper = Character(
         name="Marta the Innkeeper",
-        description="A middle-aged woman with a warm smile and flour-dusted apron. She runs the tavern and knows all the local gossip."
+        description="A middle-aged woman with a warm smile and flour-dusted apron. She runs the tavern and knows all the local gossip.",
+        controller_type="AI"
     )
     innkeeper.inventory.add_item(apple, 5)
     innkeeper.inventory.add_item(potion, 2)
     
-    guard = NPC(
+    guard = Character(
         name="Guard Tomas",
-        description="A village guard with a stern expression but kind eyes. He takes his duty of protecting the village very seriously."
+        description="A village guard with a stern expression but kind eyes. He takes his duty of protecting the village very seriously.",
+        controller_type="AI"
     )
     guard.inventory.add_item(sword, 1)
     
-    fisherwoman = NPC(
+    fisherwoman = Character(
         name="Elara the Fisherwoman",
-        description="A weathered woman with sun-tanned skin who knows the river better than anyone. She's rarely seen without her fishing rod."
+        description="A weathered woman with sun-tanned skin who knows the river better than anyone. She's rarely seen without her fishing rod.",
+        controller_type="AI"
     )
     fisherwoman.inventory.add_item(map_item, 1)
     
-    mysterious_stranger = NPC(
+    mysterious_stranger = Character(
         name="Hooded Stranger",
-        description="A figure in a dark cloak whose face is shadowed by their hood. They seem to be watching the cave entrance intently."
+        description="A figure in a dark cloak whose face is shadowed by their hood. They seem to be watching the cave entrance intently.",
+        controller_type="AI"
     )
     mysterious_stranger.inventory.add_item(amulet, 1)
     
-    # Add NPCs to zones
-    engine.add_npc(innkeeper, tavern.id)
-    engine.add_npc(guard, village_square.id)
-    engine.add_npc(fisherwoman, riverside.id)
-    engine.add_npc(mysterious_stranger, cave_entrance.id)
+    # Player character
+    player = Character(
+        name="Adventurer",
+        description="A brave adventurer seeking fortune and glory.",
+        controller_type="PLAYER"
+    )
+    player.inventory.add_item(potion, 1)
+    
+    # Add characters to zones
+    tavern.add_character(innkeeper)
+    village_square.add_character(guard)
+    riverside.add_character(fisherwoman)
+    cave_entrance.add_character(mysterious_stranger)
+    village_square.add_character(player)
     
     # Create objects
     fountain = Object(
@@ -168,94 +183,155 @@ async def create_fantasy_game() -> SimpleGameEngine:
     )
     
     # Add objects to zones
-    engine.add_object(fountain, village_square.id)
-    engine.add_object(notice_board, village_square.id)
-    engine.add_object(old_tree, forest_path.id)
-    engine.add_object(fishing_spot, riverside.id)
-    engine.add_object(glowing_crystal, cave_entrance.id)
+    village_square.add_object(fountain)
+    village_square.add_object(notice_board)
+    forest_path.add_object(old_tree)
+    riverside.add_object(fishing_spot)
+    cave_entrance.add_object(glowing_crystal)
     
-    # Create a player
-    player = Player(
-        name="Adventurer",
-        description="A brave adventurer seeking fortune and glory."
-    )
-    player.inventory.add_item(potion, 1)
+    return world, [player]
+
+class GameInterface:
+    """Interface for interacting with the game"""
     
-    # Add the player to the starting zone
-    engine.add_player(player, village_square.id)
+    def __init__(self, engine: GameEngine):
+        self.engine = engine
+        self.console = Console()
+        self.current_player_id = None
+        self.event_queue = asyncio.Queue()
+        
+        # Set up event handler for player messages
+        asyncio.create_task(self._setup_event_handlers())
     
-    return engine, player.id
+    async def _setup_event_handlers(self) -> None:
+        """Set up event handlers for the interface"""
+        # Handle messages to the player
+        async def handle_player_events(event: Event) -> None:
+            if not self.current_player_id:
+                return
+                
+            # Only handle events targeted at the current player
+            if event.target_id == self.current_player_id:
+                await self.event_queue.put(event)
+        
+        self.engine.event_bus.subscribe(None, handle_player_events)
+    
+    async def start_game(self) -> None:
+        """Start the game and run the main loop"""
+        self.console.print(Panel.fit(
+            "[bold magenta]Welcome to Mythoria[/bold magenta]\n"
+            "A fantasy adventure powered by AI agents",
+            title="Agentique Game Engine Demo",
+            border_style="magenta"
+        ))
+        
+        self.console.print("Creating game world...", style="yellow")
+        player_ids = await self.engine.setup_world(create_fantasy_world)
+        
+        if not player_ids:
+            self.console.print("Error: No player characters found!", style="bold red")
+            return
+        
+        self.current_player_id = player_ids[0]
+        self.console.print("Game world created!", style="green")
+        
+        # Start the game loop in the background
+        game_loop_task = asyncio.create_task(self.engine.run_game_loop())
+        
+        # Show initial description
+        self.console.print("\n[bold yellow]You find yourself in the village square of Eldervale.[/bold yellow]")
+        self.console.print("[yellow]Type 'help' for available commands, or simply describe what you want to do.[/yellow]\n")
+        
+        # Auto-look at the beginning
+        await self.process_command("look")
+        
+        # Process any queued events
+        await self._process_event_queue()
+        
+        try:
+            while True:
+                user_input = await asyncio.to_thread(
+                    Prompt.ask, "[bold green]What would you like to do?[/bold green]"
+                )
+                
+                if user_input.lower() in ["quit", "exit"]:
+                    break
+                
+                # Process the input
+                await self.process_command(user_input)
+                
+                # Process any queued events
+                await self._process_event_queue()
+                
+        except KeyboardInterrupt:
+            self.console.print("\n[bold red]Game interrupted by user.[/bold red]")
+        except Exception as e:
+            self.console.print(f"\n[bold red]Error: {str(e)}[/bold red]")
+        finally:
+            # Stop the game loop
+            self.engine.stop()
+            game_loop_task.cancel()
+            try:
+                await game_loop_task
+            except asyncio.CancelledError:
+                pass
+            
+            self.console.print("\n[bold magenta]Thank you for playing![/bold magenta]")
+    
+    async def process_command(self, command: str) -> None:
+        """Process a player command"""
+        if not self.current_player_id:
+            self.console.print("Error: No active player!", style="bold red")
+            return
+        
+        # Send the command to the engine
+        event = await self.engine.process_character_input(self.current_player_id, command)
+        
+        # Display the response
+        self._display_event(event)
+    
+    async def _process_event_queue(self) -> None:
+        """Process all queued events"""
+        # Get all events that are currently in the queue
+        while not self.event_queue.empty():
+            event = await self.event_queue.get()
+            self._display_event(event)
+    
+    def _display_event(self, event: Event) -> None:
+        """Display an event to the user"""
+        world = self.engine.world_manager.get_world()
+        
+        if event.type == EventType.MESSAGE:
+            self.console.print(f"[cyan]{event.content}[/cyan]")
+        elif event.type == EventType.DIALOGUE:
+            if event.source_id == self.current_player_id:
+                self.console.print(f"[green]You: {event.content}[/green]")
+            else:
+                # Get character name if possible
+                char_name = "Someone"
+                char = world.get_character_by_id(event.source_id)
+                if char:
+                    char_name = char.name
+                self.console.print(f"[yellow]{char_name}: {event.content}[/yellow]")
+        elif event.type == EventType.MOVEMENT:
+            self.console.print(f"[magenta]{event.content}[/magenta]")
+        elif event.type == EventType.INTERACTION:
+            self.console.print(f"[blue]{event.content}[/blue]")
+        else:
+            self.console.print(f"{event.content}")
+        
+        self.console.print()  # Empty line for readability
 
 async def main():
     """Main function to run the game"""
-    console.print(Panel.fit(
-        "[bold magenta]Welcome to Mythoria[/bold magenta]\n"
-        "A simple fantasy adventure powered by AI agents",
-        title="Agentique Game Engine Demo",
-        border_style="magenta"
-    ))
+    # Create the game engine
+    engine = GameEngine()
     
-    console.print("Creating game world...", style="yellow")
-    engine, player_id = await create_fantasy_game()
-    console.print("Game world created!", style="green")
+    # Create the game interface
+    interface = GameInterface(engine)
     
-    # Start the game loop in the background
-    game_loop_task = asyncio.create_task(engine.run_game_loop())
-    
-    # Show initial description
-    console.print("\n[bold yellow]You find yourself in the village square of Eldervale.[/bold yellow]")
-    console.print("[yellow]Type 'help' for available commands, or simply describe what you want to do.[/yellow]\n")
-    
-    # Auto-look at the beginning
-    initial_look = await engine.process_player_input(player_id, "look")
-    console.print(f"[cyan]{initial_look.content}[/cyan]\n")
-    
-    try:
-        while True:
-            user_input = Prompt.ask("[bold green]What would you like to do?[/bold green]")
-            
-            if user_input.lower() in ["quit", "exit"]:
-                break
-            
-            # Process the input
-            event = await engine.process_player_input(player_id, user_input)
-            
-            # Display the response based on event type
-            if event.type == EventType.MESSAGE:
-                console.print(f"[cyan]{event.content}[/cyan]")
-            elif event.type == EventType.DIALOGUE:
-                if event.source_id == player_id:
-                    console.print(f"[green]You: {event.content}[/green]")
-                else:
-                    # Get NPC name if possible
-                    npc_name = "Someone"
-                    for zone in engine.world.zones.values():
-                        if event.source_id in zone.npcs:
-                            npc_name = zone.npcs[event.source_id].name
-                    console.print(f"[yellow]{npc_name}: {event.content}[/yellow]")
-            elif event.type == EventType.MOVEMENT:
-                console.print(f"[magenta]{event.content}[/magenta]")
-            elif event.type == EventType.INTERACTION:
-                console.print(f"[blue]{event.content}[/blue]")
-            else:
-                console.print(f"{event.content}")
-            
-            console.print()  # Empty line for readability
-    
-    except KeyboardInterrupt:
-        console.print("\n[bold red]Game interrupted by user.[/bold red]")
-    except Exception as e:
-        console.print(f"\n[bold red]Error: {str(e)}[/bold red]")
-    finally:
-        # Stop the game loop
-        engine.stop()
-        game_loop_task.cancel()
-        try:
-            await game_loop_task
-        except asyncio.CancelledError:
-            pass
-        
-        console.print("\n[bold magenta]Thank you for playing![/bold magenta]")
+    # Start the game
+    await interface.start_game()
 
 if __name__ == "__main__":
     asyncio.run(main())
